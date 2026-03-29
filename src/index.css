@@ -79,6 +79,13 @@
     box-shadow: 0 0 20px hsl(168 72% 40% / 0.3);
   }
 
+  .text-gradient {
+    background: var(--bubble-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
   .chat-bubble-sent {
     @apply bg-primary text-primary-foreground rounded-2xl rounded-br-sm;
   }

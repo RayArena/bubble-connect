@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { MessageCircle, Users, UserPlus, Settings, Plus } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
 import type { Tables } from '@/integrations/supabase/types';
 import CreateGroupDialog from './CreateGroupDialog';
 
@@ -22,7 +22,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   showFriendRequests,
 }) => {
   const { profile } = useAuth();
-  const navigate = useNavigate();
+  const router = useRouter();
   const [conversations, setConversations] = useState<(Conversation & { otherUser?: Tables<'profiles'> })[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
@@ -130,7 +130,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
               )}
             </button>
             <button
-              onClick={() => navigate('/profile')}
+              onClick={() => router.push('/profile')}
               className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
               title="Profile"
             >
@@ -177,7 +177,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
         {/* User info */}
         <div className="p-3 border-t border-border">
           <button
-            onClick={() => navigate('/profile')}
+            onClick={() => router.push('/profile')}
             className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-secondary transition-colors"
           >
             <div className="w-8 h-8 rounded-full bubble-gradient flex items-center justify-center text-sm font-bold text-primary-foreground">

@@ -1,8 +1,12 @@
+"use client";
+
 import React from 'react';
 import { useRouter } from 'next/navigation';
 import { MessageCircle, Shield, Users, Phone, Video, Zap, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import heroBg from '@/assets/hero-bg.jpg';
+
+const heroBgUrl = typeof heroBg === 'string' ? heroBg : (heroBg as any)?.src || '';
 
 const features = [
   { icon: MessageCircle, title: 'Real-time Chat', desc: 'Instant messaging with friends and groups. Never miss a beat.' },
@@ -22,7 +26,7 @@ const LandingPage = () => {
       <section className="relative min-h-screen flex items-center justify-center">
         <div
           className="absolute inset-0 bg-cover bg-center opacity-30"
-          style={{ backgroundImage: `url(${heroBg})` }}
+          style={{ backgroundImage: `url(${heroBgUrl})` }}
         />
         <div className="absolute inset-0 bg-gradient-to-b from-background/60 via-background/40 to-background" />
 
@@ -46,13 +50,13 @@ const LandingPage = () => {
 
         {/* Hero content */}
         <div className="relative z-10 text-center px-6 max-w-3xl mx-auto animate-fade-in">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium mb-6">
+          {/* <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium mb-6">
             <Zap className="w-3.5 h-3.5" />
             Now in beta — join the conversation
-          </div>
+          </div> */}
           <h1 className="text-5xl md:text-7xl font-display font-bold text-foreground leading-tight mb-6">
             Where conversations{' '}
-            <span className="bg-clip-text text-transparent bubble-gradient">come alive</span>
+            <span className="text-gradient">come alive</span>
           </h1>
           <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto mb-8 leading-relaxed">
             Chat, call, and connect with friends — all in one beautifully designed space. Fast, private, and built for the way you communicate.
@@ -70,11 +74,11 @@ const LandingPage = () => {
         </div>
 
         {/* Scroll indicator */}
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 animate-bounce">
+        {/* <div className="absolute bottom-8 left-1/2 -translate-x-1/2 animate-bounce">
           <div className="w-6 h-10 rounded-full border-2 border-muted-foreground/30 flex items-start justify-center p-1.5">
             <div className="w-1.5 h-2.5 rounded-full bg-muted-foreground/50" />
           </div>
-        </div>
+        </div> */}
       </section>
 
       {/* Features */}
