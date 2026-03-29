@@ -55,7 +55,7 @@ const AuthPage = () => {
         toast({ title: 'Sign up failed', description: error.message, variant: 'destructive' });
       } else {
         toast({ title: 'Welcome to Bubble!', description: 'Your account has been created.' });
-        navigate('/');
+        navigate('/chat');
       }
     } else {
       const { error } = await signIn(email, password);
