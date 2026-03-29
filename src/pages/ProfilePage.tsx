@@ -39,7 +39,7 @@ const ProfilePage = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-lg mx-auto p-6 animate-fade-in">
-        <button onClick={() => navigate('/')} className="flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors">
+        <button onClick={() => navigate('/chat')} className="flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors">
           <ArrowLeft className="w-4 h-4" />
           Back to chats
         </button>
