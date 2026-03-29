@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,13 +19,15 @@ const ProfilePage = () => {
   const handleSave = async () => {
     if (!profile) return;
     setSaving(true);
-    const { error } = await supabase
-      .from('profiles')
-      .update({ display_name: displayName, bio })
-      .eq('user_id', profile.user_id);
+    const response = await fetch('/api/profile', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName, bio }),
+    });
 
-    if (error) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    if (!response.ok) {
+      const payload = await response.json();
+      toast({ title: 'Error', description: payload.error || 'Failed to update profile', variant: 'destructive' });
     } else {
       toast({ title: 'Profile updated!' });
       await refreshProfile();

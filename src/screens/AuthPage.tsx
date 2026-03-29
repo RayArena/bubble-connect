@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,10 +29,13 @@ const AuthPage = () => {
 
     const timer = setTimeout(async () => {
       setCheckingUsername(true);
-      const { data, error } = await supabase.rpc('check_username_available', {
-        desired_username: username.toLowerCase(),
-      });
-      if (!error) setUsernameAvailable(data as boolean);
+      const res = await fetch(`/api/users/check-username?username=${encodeURIComponent(username.toLowerCase())}`);
+      if (res.ok) {
+        const payload = await res.json();
+        setUsernameAvailable(Boolean(payload.available));
+      } else {
+        setUsernameAvailable(false);
+      }
       setCheckingUsername(false);
     }, 500);
 
