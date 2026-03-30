@@ -6,6 +6,9 @@ export interface Profile {
   bio: string | null;
   avatar_url: string | null;
   status: string | null;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  deletion_recover_until?: string | null;
   created_at: string;
   updated_at: string;
 }

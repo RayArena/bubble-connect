@@ -32,7 +32,7 @@ export async function GET(_request: Request, context: Context) {
   const senderIds = Array.from(new Set(messages.map((m) => m.sender_id)));
   const senders = await db
     .collection("profiles")
-    .find({ user_id: { $in: senderIds } })
+    .find({ user_id: { $in: senderIds }, is_deleted: { $ne: true } })
     .toArray();
 
   const senderMap: Record<string, ReturnType<typeof serializeDoc>> = {};

@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     const requesterIds = pending.map((friendship) => friendship.requester_id);
     const requesters = await db
       .collection("profiles")
-      .find({ user_id: { $in: requesterIds } })
+      .find({ user_id: { $in: requesterIds }, is_deleted: { $ne: true } })
       .toArray();
 
     const requesterMap: Record<string, unknown> = {};
@@ -35,11 +35,15 @@ export async function GET(request: NextRequest) {
       requesterMap[requester.user_id] = serializeDoc(requester);
     });
 
-    return NextResponse.json({
-      friendships: pending.map((friendship) => ({
+    const pendingWithRequester = pending
+      .map((friendship) => ({
         ...serializeDoc(friendship),
         requester: requesterMap[friendship.requester_id] || null,
-      })),
+      }))
+      .filter((friendship) => Boolean(friendship.requester));
+
+    return NextResponse.json({
+      friendships: pendingWithRequester,
     });
   }
 
@@ -56,7 +60,7 @@ export async function GET(request: NextRequest) {
     );
     const profiles = await db
       .collection("profiles")
-      .find({ user_id: { $in: friendUserIds } })
+      .find({ user_id: { $in: friendUserIds }, is_deleted: { $ne: true } })
       .toArray();
 
     const profileMap: Record<string, unknown> = {};
@@ -64,15 +68,19 @@ export async function GET(request: NextRequest) {
       profileMap[profile.user_id] = serializeDoc(profile);
     });
 
-    return NextResponse.json({
-      friendships: friends.map((friendship) => {
+    const friendsWithProfiles = friends
+      .map((friendship) => {
         const friendUserId =
           friendship.requester_id === authState.userId ? friendship.addressee_id : friendship.requester_id;
         return {
           ...serializeDoc(friendship),
           friend: profileMap[friendUserId] || null,
         };
-      }),
+      })
+      .filter((friendship) => Boolean(friendship.friend));
+
+    return NextResponse.json({
+      friendships: friendsWithProfiles,
     });
   }
 
@@ -94,6 +102,13 @@ export async function POST(request: Request) {
 
   const db = await getDb();
   const friendships = db.collection("friendships");
+  const addresseeProfile = await db
+    .collection("profiles")
+    .findOne({ user_id: addresseeId, is_deleted: { $ne: true } }, { projection: { _id: 1 } });
+
+  if (!addresseeProfile) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
 
   const existing = await friendships.findOne({
     $or: [

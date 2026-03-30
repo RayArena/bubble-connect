@@ -32,12 +32,19 @@ export async function GET() {
         });
 
         if (otherMember) {
-          const otherUser = await profiles.findOne({ user_id: otherMember.user_id });
+          const otherUser = await profiles.findOne({ user_id: otherMember.user_id, is_deleted: { $ne: true } });
+
+          if (!otherUser) {
+            return null;
+          }
+
           return {
             ...serializeDoc(conversation),
             otherUser: otherUser ? serializeDoc(otherUser) : null,
           };
         }
+
+        return null;
       }
 
       return {
@@ -47,7 +54,7 @@ export async function GET() {
     })
   );
 
-  return NextResponse.json({ conversations: enriched });
+  return NextResponse.json({ conversations: enriched.filter(Boolean) });
 }
 
 export async function POST(request: Request) {
@@ -66,6 +73,14 @@ export async function POST(request: Request) {
     }
 
     const db = await getDb();
+    const friendProfile = await db
+      .collection("profiles")
+      .findOne({ user_id: friendUserId, is_deleted: { $ne: true } }, { projection: { _id: 1 } });
+
+    if (!friendProfile) {
+      return NextResponse.json({ error: "friend user not found" }, { status: 404 });
+    }
+
     const myMemberships = await db
       .collection("conversation_members")
       .find({ user_id: authState.userId })

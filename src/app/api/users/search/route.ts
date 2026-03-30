@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
     .collection("profiles")
     .find({
       user_id: { $ne: authState.userId },
+      is_deleted: { $ne: true },
       username: { $regex: query, $options: "i" },
     })
     .limit(10)

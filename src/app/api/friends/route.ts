@@ -25,7 +25,7 @@ export async function GET() {
 
   const profiles = await db
     .collection("profiles")
-    .find({ user_id: { $in: friendIds } })
+    .find({ user_id: { $in: friendIds }, is_deleted: { $ne: true } })
     .toArray();
 
   return NextResponse.json({ friends: profiles.map(serializeDoc) });

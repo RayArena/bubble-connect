@@ -34,7 +34,9 @@ export async function GET(_request: Request, context: Context) {
       user_id: { $ne: authState.userId },
     });
     if (member) {
-      const profile = await db.collection("profiles").findOne({ user_id: member.user_id });
+      const profile = await db
+        .collection("profiles")
+        .findOne({ user_id: member.user_id, is_deleted: { $ne: true } });
       otherUser = profile ? serializeDoc(profile) : null;
     }
   }

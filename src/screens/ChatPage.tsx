@@ -3,11 +3,30 @@ import { useAuth } from '@/contexts/AuthContext';
 import ChatSidebar from '@/components/chat/ChatSidebar';
 import ChatArea from '@/components/chat/ChatArea';
 import FriendRequestPanel from '@/components/chat/FriendRequestPanel';
+import { Button } from '@/components/ui/button';
+import { useRouter } from 'next/navigation';
 
 const ChatPage = () => {
   const { profile } = useAuth();
+  const router = useRouter();
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [showFriendRequests, setShowFriendRequests] = useState(false);
+
+  if (profile?.is_deleted) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-card border border-border rounded-xl p-6 text-center space-y-4">
+          <h1 className="text-xl font-display font-bold text-foreground">Profile Scheduled For Deletion</h1>
+          <p className="text-sm text-muted-foreground">
+            Your account is in recovery mode. Restore your profile to continue chatting.
+          </p>
+          <Button onClick={() => router.push('/profile')} className="w-full bubble-gradient text-primary-foreground">
+            Go To Profile Recovery
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
