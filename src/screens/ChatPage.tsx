@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
 import ChatSidebar from '@/components/chat/ChatSidebar';
 import ChatArea from '@/components/chat/ChatArea';
 import FriendRequestPanel from '@/components/chat/FriendRequestPanel';
 
 const ChatPage = () => {
-  const { profile } = useAuth();
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [showFriendRequests, setShowFriendRequests] = useState(false);
 

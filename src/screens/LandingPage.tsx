@@ -2,11 +2,12 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
+import type { StaticImageData } from 'next/image';
 import { MessageCircle, Shield, Users, Phone, Video, Zap, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import heroBg from '@/assets/hero-bg.jpg';
 
-const heroBgUrl = typeof heroBg === 'string' ? heroBg : (heroBg as any)?.src || '';
+const heroBgUrl = typeof heroBg === 'string' ? heroBg : (heroBg as StaticImageData).src;
 
 const features = [
   { icon: MessageCircle, title: 'Real-time Chat', desc: 'Instant messaging with friends and groups. Never miss a beat.' },

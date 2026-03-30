@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,6 +14,7 @@ const AuthPage = () => {
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [usernameCheckError, setUsernameCheckError] = useState<string | null>(null);
   const [checkingUsername, setCheckingUsername] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const { signIn, signUp } = useAuth();
@@ -25,15 +25,27 @@ const AuthPage = () => {
   useEffect(() => {
     if (!isSignUp || username.length < 3) {
       setUsernameAvailable(null);
+      setUsernameCheckError(null);
       return;
     }
 
     const timer = setTimeout(async () => {
       setCheckingUsername(true);
-      const { data, error } = await supabase.rpc('check_username_available', {
-        desired_username: username.toLowerCase(),
-      });
-      if (!error) setUsernameAvailable(data as boolean);
+      try {
+        const res = await fetch(`/api/users/check-username?username=${encodeURIComponent(username.toLowerCase())}`);
+        const payload = await res.json();
+
+        if (res.ok) {
+          setUsernameAvailable(Boolean(payload.available));
+          setUsernameCheckError(null);
+        } else {
+          setUsernameAvailable(null);
+          setUsernameCheckError(payload.error || 'Username check is temporarily unavailable.');
+        }
+      } catch {
+        setUsernameAvailable(null);
+        setUsernameCheckError('Username check is temporarily unavailable.');
+      }
       setCheckingUsername(false);
     }, 500);
 
@@ -45,7 +57,7 @@ const AuthPage = () => {
     setSubmitting(true);
 
     if (isSignUp) {
-      if (!usernameAvailable) {
+      if (usernameAvailable === false) {
         toast({ title: 'Username not available', description: 'Please choose a different username.', variant: 'destructive' });
         setSubmitting(false);
         return;
@@ -110,6 +122,9 @@ const AuthPage = () => {
                 )}
                 {usernameAvailable === true && (
                   <p className="text-xs text-online">Username is available!</p>
+                )}
+                {usernameCheckError && (
+                  <p className="text-xs text-muted-foreground">{usernameCheckError}</p>
                 )}
               </div>
 

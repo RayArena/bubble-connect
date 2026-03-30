@@ -1,14 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Search, UserPlus, Check, X, MessageCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import type { Tables } from '@/integrations/supabase/types';
-
-type Profile = Tables<'profiles'>;
-type Friendship = Tables<'friendships'>;
+import type { Friendship, Profile } from '@/types/db';
 
 interface FriendRequestPanelProps {
   onClose: () => void;
@@ -31,70 +27,48 @@ const FriendRequestPanel: React.FC<FriendRequestPanelProps> = ({ onClose }) => {
 
   const loadPendingRequests = async () => {
     if (!user) return;
-    const { data } = await supabase
-      .from('friendships')
-      .select('*')
-      .eq('addressee_id', user.id)
-      .eq('status', 'pending');
-
-    if (!data) return;
-
-    const enriched = await Promise.all(
-      data.map(async (f) => {
-        const { data: p } = await supabase.from('profiles').select('*').eq('user_id', f.requester_id).single();
-        return { ...f, requester: p || undefined };
-      })
-    );
-    setPendingRequests(enriched);
+    const response = await fetch('/api/friendships?type=pending', { cache: 'no-store' });
+    if (!response.ok) return;
+    const payload = await response.json();
+    setPendingRequests(payload.friendships || []);
   };
 
   const loadFriends = async () => {
     if (!user) return;
-    const { data } = await supabase
-      .from('friendships')
-      .select('*')
-      .eq('status', 'accepted')
-      .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`);
-
-    if (!data) return;
-
-    const enriched = await Promise.all(
-      data.map(async (f) => {
-        const friendId = f.requester_id === user.id ? f.addressee_id : f.requester_id;
-        const { data: p } = await supabase.from('profiles').select('*').eq('user_id', friendId).single();
-        return { ...f, friend: p || undefined };
-      })
-    );
-    setFriends(enriched);
+    const response = await fetch('/api/friendships?type=friends', { cache: 'no-store' });
+    if (!response.ok) return;
+    const payload = await response.json();
+    setFriends(payload.friendships || []);
   };
 
   const searchUsers = async () => {
     if (!searchQuery.trim() || !user) return;
     setSearching(true);
 
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .ilike('username', `%${searchQuery.toLowerCase()}%`)
-      .neq('user_id', user.id)
-      .limit(10);
-
-    setSearchResults(data || []);
+    const response = await fetch(`/api/users/search?query=${encodeURIComponent(searchQuery.toLowerCase())}`, { cache: 'no-store' });
+    if (response.ok) {
+      const payload = await response.json();
+      setSearchResults(payload.users || []);
+    }
     setSearching(false);
   };
 
   const sendFriendRequest = async (addresseeId: string) => {
     if (!user) return;
-    const { error } = await supabase.from('friendships').insert({
-      requester_id: user.id,
-      addressee_id: addresseeId,
+    const response = await fetch('/api/friendships', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        addresseeId,
+      }),
     });
 
-    if (error) {
-      if (error.code === '23505') {
+    if (!response.ok) {
+      const payload = await response.json();
+      if (payload.code === 'ALREADY_EXISTS') {
         toast({ title: 'Already sent', description: 'Friend request already exists' });
       } else {
-        toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        toast({ title: 'Error', description: payload.error || 'Could not send request', variant: 'destructive' });
       }
     } else {
       toast({ title: 'Request sent!' });
@@ -103,13 +77,22 @@ const FriendRequestPanel: React.FC<FriendRequestPanelProps> = ({ onClose }) => {
   };
 
   const respondToRequest = async (friendshipId: string, accept: boolean) => {
-    if (accept) {
-      await supabase.from('friendships').update({ status: 'accepted' }).eq('id', friendshipId);
-      toast({ title: 'Friend added!' });
+    const response = await fetch('/api/friendships', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ friendshipId, accept }),
+    });
+
+    if (response.ok) {
+      if (accept) {
+        toast({ title: 'Friend added!' });
+      } else {
+        toast({ title: 'Request declined' });
+      }
     } else {
-      await supabase.from('friendships').delete().eq('id', friendshipId);
-      toast({ title: 'Request declined' });
+      toast({ title: 'Error', description: 'Could not update request', variant: 'destructive' });
     }
+
     loadPendingRequests();
     loadFriends();
   };
@@ -117,56 +100,19 @@ const FriendRequestPanel: React.FC<FriendRequestPanelProps> = ({ onClose }) => {
   const startDM = async (friendUserId: string) => {
     if (!user) return;
 
-    // Check if DM already exists
-    const { data: myConvs } = await supabase
-      .from('conversation_members')
-      .select('conversation_id')
-      .eq('user_id', user.id);
+    const response = await fetch('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'dm', memberIds: [friendUserId] }),
+    });
 
-    if (myConvs) {
-      for (const mc of myConvs) {
-        const { data: conv } = await supabase
-          .from('conversations')
-          .select('*')
-          .eq('id', mc.conversation_id)
-          .eq('type', 'dm')
-          .single();
-
-        if (conv) {
-          const { data: otherMember } = await supabase
-            .from('conversation_members')
-            .select('user_id')
-            .eq('conversation_id', conv.id)
-            .eq('user_id', friendUserId)
-            .single();
-
-          if (otherMember) {
-            toast({ title: 'Conversation exists', description: 'Opening existing DM' });
-            return;
-          }
-        }
-      }
-    }
-
-    // Create new DM
-    const { data: newConv, error: convError } = await supabase
-      .from('conversations')
-      .insert({ type: 'dm', created_by: user.id })
-      .select()
-      .single();
-
-    if (convError || !newConv) {
+    if (!response.ok) {
       toast({ title: 'Error', description: 'Failed to create conversation', variant: 'destructive' });
       return;
     }
 
-    // Add both members
-    await supabase.from('conversation_members').insert([
-      { conversation_id: newConv.id, user_id: user.id },
-      { conversation_id: newConv.id, user_id: friendUserId },
-    ]);
-
-    toast({ title: 'DM created!' });
+    const payload = await response.json();
+    toast({ title: payload.existed ? 'Conversation exists' : 'DM created!' });
   };
 
   return (

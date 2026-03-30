@@ -1,13 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { Send, Phone, Video, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import type { Tables } from '@/integrations/supabase/types';
+import type { Message, Profile } from '@/types/db';
 import { useToast } from '@/hooks/use-toast';
-
-type Message = Tables<'messages'>;
-type Profile = Tables<'profiles'>;
 
 interface ChatAreaProps {
   conversationId: string;
@@ -21,26 +17,27 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
   const [convName, setConvName] = useState('');
   const [convType, setConvType] = useState('dm');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [profiles, setProfiles] = useState<Record<string, Profile>>({});
 
   useEffect(() => {
-    loadConversation();
-    loadMessages();
+    let mounted = true;
 
-    const channel = supabase
-      .channel(`messages:${conversationId}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `conversation_id=eq.${conversationId}`,
-      }, (payload) => {
-        const msg = payload.new as Message;
-        setMessages(prev => [...prev, { ...msg, sender: profiles[msg.sender_id] }]);
-      })
-      .subscribe();
+    const hydrate = async () => {
+      await loadConversation();
+      await loadMessages();
+    };
 
-    return () => { supabase.removeChannel(channel); };
+    void hydrate();
+
+    const interval = setInterval(() => {
+      if (mounted) {
+        void loadMessages();
+      }
+    }, 2000);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
   }, [conversationId]);
 
   useEffect(() => {
@@ -48,57 +45,27 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
   }, [messages]);
 
   const loadConversation = async () => {
-    const { data: conv } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('id', conversationId)
-      .single();
+    const response = await fetch(`/api/conversations/${conversationId}`, { cache: 'no-store' });
+    if (!response.ok) return;
 
+    const payload = await response.json();
+    const conv = payload.conversation;
     if (!conv) return;
-    setConvType(conv.type);
 
+    setConvType(conv.type);
     if (conv.type === 'group') {
       setConvName(conv.name || 'Group');
-    } else {
-      const { data: members } = await supabase
-        .from('conversation_members')
-        .select('user_id')
-        .eq('conversation_id', conversationId)
-        .neq('user_id', user?.id || '');
-
-      if (members?.[0]) {
-        const { data: p } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('user_id', members[0].user_id)
-          .single();
-        if (p) setConvName(p.display_name);
-      }
+      return;
     }
+
+    setConvName(payload.otherUser?.display_name || 'Unknown');
   };
 
   const loadMessages = async () => {
-    const { data } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true })
-      .limit(100);
-
-    if (!data) return;
-
-    // Load sender profiles
-    const senderIds = [...new Set(data.map(m => m.sender_id))];
-    const { data: senderProfiles } = await supabase
-      .from('profiles')
-      .select('*')
-      .in('user_id', senderIds);
-
-    const profileMap: Record<string, Profile> = {};
-    senderProfiles?.forEach(p => { profileMap[p.user_id] = p; });
-    setProfiles(profileMap);
-
-    setMessages(data.map(m => ({ ...m, sender: profileMap[m.sender_id] })));
+    const response = await fetch(`/api/conversations/${conversationId}/messages`, { cache: 'no-store' });
+    if (!response.ok) return;
+    const payload = await response.json();
+    setMessages(payload.messages || []);
   };
 
   const sendMessage = async (e: React.FormEvent) => {
@@ -108,15 +75,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
     const content = newMessage.trim();
     setNewMessage('');
 
-    const { error } = await supabase.from('messages').insert({
-      conversation_id: conversationId,
-      sender_id: user.id,
-      content,
+    const response = await fetch(`/api/conversations/${conversationId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content,
+      }),
     });
 
-    if (error) {
+    if (!response.ok) {
       toast({ title: 'Error', description: 'Failed to send message', variant: 'destructive' });
+      return;
     }
+
+    await loadMessages();
   };
 
   const formatTime = (dateStr: string) => {

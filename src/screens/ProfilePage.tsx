@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowLeft, Loader2, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Loader2, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 
@@ -16,17 +15,25 @@ const ProfilePage = () => {
   const [displayName, setDisplayName] = useState(profile?.display_name || '');
   const [bio, setBio] = useState(profile?.bio || '');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    setDisplayName(profile?.display_name || '');
+    setBio(profile?.bio || '');
+  }, [profile]);
 
   const handleSave = async () => {
     if (!profile) return;
     setSaving(true);
-    const { error } = await supabase
-      .from('profiles')
-      .update({ display_name: displayName, bio })
-      .eq('user_id', profile.user_id);
+    const response = await fetch('/api/profile', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName, bio }),
+    });
 
-    if (error) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    if (!response.ok) {
+      const payload = await response.json();
+      toast({ title: 'Error', description: payload.error || 'Failed to update profile', variant: 'destructive' });
     } else {
       toast({ title: 'Profile updated!' });
       await refreshProfile();
@@ -34,7 +41,62 @@ const ProfilePage = () => {
     setSaving(false);
   };
 
-  if (!profile) return null;
+  const handleDeleteProfile = async () => {
+    if (!profile) return;
+
+    const firstConfirmation = window.confirm(
+      'Delete your account permanently? This will remove your profile and sign-in account. This cannot be undone.'
+    );
+    if (!firstConfirmation) return;
+
+    const secondConfirmation = window.confirm(
+      'Final confirmation: permanently delete your account, friendships, conversations, memberships, and messages?'
+    );
+    if (!secondConfirmation) return;
+
+    setDeleting(true);
+    try {
+      const response = await fetch('/api/profile', { method: 'DELETE' });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const message = typeof payload?.error === 'string' ? payload.error : 'Failed to delete account';
+        toast({ title: 'Error', description: message, variant: 'destructive' });
+        return;
+      }
+
+      toast({
+        title: 'Account deleted',
+        description: 'Your account and related data were permanently deleted.',
+      });
+
+      try {
+        await signOut();
+      } catch {
+        // Account is already deleted server-side; continue redirect.
+      }
+
+      router.replace('/auth');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  if (!profile) {
+    return (
+      <div className="min-h-screen bg-background p-6 flex items-center justify-center">
+        <div className="max-w-md w-full bg-card border border-border rounded-xl p-6 space-y-4 text-center">
+          <h1 className="text-xl font-display font-bold text-foreground">Profile unavailable</h1>
+          <p className="text-sm text-muted-foreground">
+            Your profile could not be loaded. It may have already been deleted.
+          </p>
+          <Button variant="ghost" onClick={signOut} className="w-full text-destructive hover:text-destructive hover:bg-destructive/10">
+            Sign Out
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -84,6 +146,23 @@ const ProfilePage = () => {
           <Button onClick={handleSave} className="w-full bubble-gradient text-primary-foreground" disabled={saving}>
             {saving && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
             Save Changes
+          </Button>
+        </div>
+
+        <div className="bg-card rounded-xl border border-border p-6 mt-4 space-y-3">
+          <h2 className="text-sm font-semibold text-foreground">Danger Zone</h2>
+          <p className="text-xs text-muted-foreground">
+            Deleting your account permanently removes your Clerk sign-in account and all related app data.
+          </p>
+          <Button
+            variant="destructive"
+            onClick={handleDeleteProfile}
+            className="w-full"
+            disabled={deleting}
+          >
+            {deleting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+            <Trash2 className="w-4 h-4 mr-2" />
+            Delete Account Permanently
           </Button>
         </div>
 

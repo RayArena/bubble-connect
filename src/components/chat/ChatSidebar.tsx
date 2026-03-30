@@ -1,12 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { MessageCircle, Users, UserPlus, Settings, Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import type { Tables } from '@/integrations/supabase/types';
+import type { Conversation, Profile } from '@/types/db';
 import CreateGroupDialog from './CreateGroupDialog';
-
-type Conversation = Tables<'conversations'>;
 
 interface ChatSidebarProps {
   activeConversationId: string | null;
@@ -23,7 +20,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 }) => {
   const { profile } = useAuth();
   const router = useRouter();
-  const [conversations, setConversations] = useState<(Conversation & { otherUser?: Tables<'profiles'> })[]>([]);
+  const [conversations, setConversations] = useState<(Conversation & { otherUser?: Profile | null })[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
 
@@ -35,65 +32,26 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
   const loadConversations = async () => {
     if (!profile) return;
-
-    const { data: memberData } = await supabase
-      .from('conversation_members')
-      .select('conversation_id')
-      .eq('user_id', profile.user_id);
-
-    if (!memberData?.length) return;
-
-    const convIds = memberData.map(m => m.conversation_id);
-    const { data: convs } = await supabase
-      .from('conversations')
-      .select('*')
-      .in('id', convIds)
-      .order('updated_at', { ascending: false });
-
-    if (!convs) return;
-
-    // For DM conversations, get the other user's profile
-    const enriched = await Promise.all(
-      convs.map(async (conv) => {
-        if (conv.type === 'dm') {
-          const { data: members } = await supabase
-            .from('conversation_members')
-            .select('user_id')
-            .eq('conversation_id', conv.id)
-            .neq('user_id', profile.user_id);
-
-          if (members?.[0]) {
-            const { data: otherProfile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('user_id', members[0].user_id)
-              .single();
-            return { ...conv, otherUser: otherProfile || undefined };
-          }
-        }
-        return conv;
-      })
-    );
-
-    setConversations(enriched);
+    const response = await fetch('/api/conversations', { cache: 'no-store' });
+    if (!response.ok) return;
+    const payload = await response.json();
+    setConversations(payload.conversations || []);
   };
 
   const loadPendingCount = async () => {
     if (!profile) return;
-    const { count } = await supabase
-      .from('friendships')
-      .select('*', { count: 'exact', head: true })
-      .eq('addressee_id', profile.user_id)
-      .eq('status', 'pending');
-    setPendingCount(count || 0);
+    const response = await fetch('/api/friendships?type=pendingCount', { cache: 'no-store' });
+    if (!response.ok) return;
+    const payload = await response.json();
+    setPendingCount(payload.count || 0);
   };
 
-  const getConversationName = (conv: Conversation & { otherUser?: Tables<'profiles'> }) => {
+  const getConversationName = (conv: Conversation & { otherUser?: Profile | null }) => {
     if (conv.type === 'group') return conv.name || 'Group';
     return conv.otherUser?.display_name || 'Unknown';
   };
 
-  const getConversationInitial = (conv: Conversation & { otherUser?: Tables<'profiles'> }) => {
+  const getConversationInitial = (conv: Conversation & { otherUser?: Profile | null }) => {
     const name = getConversationName(conv);
     return name.charAt(0).toUpperCase();
   };
