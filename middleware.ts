@@ -6,7 +6,6 @@ const isPublicRoute = createRouteMatcher([
   "/auth(.*)",
   "/api/users/check-username(.*)",
   "/api/webhooks/clerk(.*)",
-  "/api/internal/purge-deleted-profiles(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

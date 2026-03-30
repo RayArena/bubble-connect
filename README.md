@@ -14,7 +14,6 @@ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""
 CLERK_SECRET_KEY=""
 MONGODB_URI=""
 CLERK_WEBHOOK_SIGNING_SECRET=""
-CRON_SECRET=""
 ```
 
 ## Clerk Webhook Setup
@@ -38,6 +37,5 @@ npm run dev
 
 - Sign-in/sign-up UI is preserved from the original auth page.
 - Chat message updates now use polling (every 2 seconds) instead of Supabase realtime channels.
-- Users can schedule profile deletion from the profile page and recover within 30 days.
+- Users can permanently delete their full account (Clerk auth + app data) from the profile page after a double confirmation.
 - Clerk `user.deleted` webhook now removes profile, friendships, memberships, and linked conversation/message data.
-- For automatic post-recovery cleanup, call `POST /api/internal/purge-deleted-profiles` daily with header `x-cron-secret: <CRON_SECRET>`.
