@@ -28,6 +28,18 @@ export async function requireUserId() {
   return { userId, error: null };
 }
 
+export async function readJsonBody<T>(request: Request) {
+  try {
+    const body = (await request.json()) as T;
+    return { body, error: null };
+  } catch {
+    return {
+      body: null,
+      error: badRequest("Invalid JSON body"),
+    };
+  }
+}
+
 export function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }

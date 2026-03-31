@@ -7,6 +7,18 @@ import { Label } from '@/components/ui/label';
 import { MessageCircle, Check, X, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
+const validateSignUpPassword = (value: string) => {
+  if (value.length < 8) {
+    return 'Password must be at least 8 characters long.';
+  }
+
+  if (!/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/[0-9]/.test(value)) {
+    return 'Password must include uppercase, lowercase, and a number.';
+  }
+
+  return null;
+};
+
 const AuthPage = () => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -20,6 +32,7 @@ const AuthPage = () => {
   const { signIn, signUp } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
+  const passwordError = isSignUp ? validateSignUpPassword(password) : null;
 
   // Debounced username check
   useEffect(() => {
@@ -54,15 +67,41 @@ const AuthPage = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
+
+    if (submitting) {
+      return;
+    }
 
     if (isSignUp) {
-      if (usernameAvailable === false) {
-        toast({ title: 'Username not available', description: 'Please choose a different username.', variant: 'destructive' });
-        setSubmitting(false);
+      if (checkingUsername) {
+        toast({ title: 'Please wait', description: 'Still checking username availability.' });
         return;
       }
-      const { error } = await signUp(email, password, username.toLowerCase(), displayName || username);
+
+      if (username.trim().length < 3) {
+        toast({ title: 'Invalid username', description: 'Username must be at least 3 characters.', variant: 'destructive' });
+        return;
+      }
+
+      if (usernameAvailable === false) {
+        toast({ title: 'Username not available', description: 'Please choose a different username.', variant: 'destructive' });
+        return;
+      }
+
+      if (passwordError) {
+        toast({ title: 'Weak password', description: passwordError, variant: 'destructive' });
+        return;
+      }
+    }
+
+    setSubmitting(true);
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedUsername = username.trim().toLowerCase();
+    const normalizedDisplayName = displayName.trim() || normalizedUsername;
+
+    if (isSignUp) {
+      const { error } = await signUp(normalizedEmail, password, normalizedUsername, normalizedDisplayName);
       if (error) {
         toast({ title: 'Sign up failed', description: error.message, variant: 'destructive' });
       } else {
@@ -70,7 +109,7 @@ const AuthPage = () => {
         router.push('/chat');
       }
     } else {
-      const { error } = await signIn(email, password);
+      const { error } = await signIn(normalizedEmail, password);
       if (error) {
         toast({ title: 'Sign in failed', description: error.message, variant: 'destructive' });
       } else {
@@ -164,12 +203,22 @@ const AuthPage = () => {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               className="bg-secondary border-border text-foreground placeholder:text-muted-foreground"
-              minLength={6}
+              minLength={isSignUp ? 8 : 6}
               required
             />
+            {isSignUp && (
+              <p className="text-xs text-muted-foreground">
+                Use at least 8 characters with uppercase, lowercase, and a number. Use a unique password not used on other sites.
+              </p>
+            )}
+            {isSignUp && passwordError && <p className="text-xs text-destructive">{passwordError}</p>}
           </div>
 
-          <Button type="submit" className="w-full bubble-gradient text-primary-foreground font-semibold" disabled={submitting}>
+          <Button
+            type="submit"
+            className="w-full bubble-gradient text-primary-foreground font-semibold"
+            disabled={submitting || (isSignUp && checkingUsername)}
+          >
             {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
             {isSignUp ? 'Create Account' : 'Sign In'}
           </Button>

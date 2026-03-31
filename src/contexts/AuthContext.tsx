@@ -32,11 +32,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  type AuthMode = 'signIn' | 'signUp';
+  type ClerkErrorItem = { code?: string; longMessage?: string; message?: string };
+
   const supportsSignUpField = (field: string) => {
     if (!clerkSignUp) return false;
+
+    const requiredFields = Array.isArray(clerkSignUp.requiredFields) ? clerkSignUp.requiredFields : [];
+    const optionalFields = Array.isArray(clerkSignUp.optionalFields) ? clerkSignUp.optionalFields : [];
+
     return (
-      clerkSignUp.requiredFields.includes(field as never) ||
-      clerkSignUp.optionalFields.includes(field as never)
+      requiredFields.includes(field as never) ||
+      optionalFields.includes(field as never)
     );
   };
 
@@ -51,41 +58,134 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { firstName, lastName };
   };
 
-  const getAuthErrorMessage = (error: unknown, fallback: string) => {
+  const mapKnownAuthError = (message: string, mode: AuthMode, code?: string) => {
+    const normalizedMessage = message.toLowerCase();
+    const normalizedCode = (code || '').toLowerCase();
+
+    if (
+      normalizedCode === 'form_password_pwned' ||
+      normalizedMessage.includes('online data breach') ||
+      normalizedMessage.includes('compromised password')
+    ) {
+      return 'This password is not allowed because it appears in known data breaches. Use a unique password that you do not use on any other site.';
+    }
+
+    if (mode === 'signUp' && normalizedCode === 'form_identifier_exists') {
+      return 'An account with this email already exists. Please sign in instead.';
+    }
+
+    if (mode === 'signIn' && normalizedCode === 'form_identifier_not_found') {
+      return 'No account found for this email. Please sign up first.';
+    }
+
+    if (
+      mode === 'signIn' &&
+      (normalizedCode === 'form_password_incorrect' || normalizedMessage.includes('password is incorrect'))
+    ) {
+      return 'Incorrect password. Please try again.';
+    }
+
+    if (mode === 'signIn' && normalizedCode === 'session_exists') {
+      return 'You are already signed in. Please refresh the page.';
+    }
+
+    return message;
+  };
+
+  const getAuthErrorMessage = (error: unknown, fallback: string, mode: AuthMode) => {
+    let message = fallback;
+    let code: string | undefined;
+
     if (typeof error === 'object' && error !== null) {
       const maybeClerk = error as {
         longMessage?: string;
         message?: string;
-        errors?: Array<{ longMessage?: string; message?: string; code?: string }>;
+        code?: string;
+        errors?: ClerkErrorItem[];
       };
 
+      if (typeof maybeClerk.code === 'string' && maybeClerk.code) {
+        code = maybeClerk.code;
+      }
+
       if (typeof maybeClerk.longMessage === 'string' && maybeClerk.longMessage) {
-        return maybeClerk.longMessage;
+        message = maybeClerk.longMessage;
       }
 
       const nested = maybeClerk.errors;
       if (Array.isArray(nested) && nested[0]) {
-        if (nested[0].longMessage) return nested[0].longMessage;
-        if (nested[0].message) return nested[0].message;
+        if (nested[0].code) {
+          code = nested[0].code;
+        }
+        if (nested[0].longMessage) {
+          message = nested[0].longMessage;
+        } else if (nested[0].message) {
+          message = nested[0].message;
+        }
       }
 
-      if (typeof maybeClerk.message === 'string' && maybeClerk.message) {
-        return maybeClerk.message;
-      }
-    }
-
-    if (error instanceof Error && error.message) {
-      return error.message;
-    }
-
-    if (typeof error === 'object' && error !== null && 'errors' in error) {
-      const nested = (error as { errors?: Array<{ message?: string }> }).errors;
-      if (Array.isArray(nested) && nested[0]?.message) {
-        return nested[0].message;
+      if (message === fallback && typeof maybeClerk.message === 'string' && maybeClerk.message) {
+        message = maybeClerk.message;
       }
     }
 
-    return fallback;
+    if (message === fallback && error instanceof Error && error.message) {
+      message = error.message;
+    }
+
+    return mapKnownAuthError(message, mode, code);
+  };
+
+  const parseJsonSafely = async (response: Response) => {
+    try {
+      return (await response.json()) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  };
+
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const ensureProfile = async (username: string, displayName: string) => {
+    const retryDelays = [0, 250, 600];
+
+    for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+      if (retryDelays[attempt] > 0) {
+        await wait(retryDelays[attempt]);
+      }
+
+      try {
+        const profileRes = await fetch('/api/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username,
+            displayName,
+          }),
+        });
+
+        if (profileRes.ok) {
+          return { error: null };
+        }
+
+        const payload = await parseJsonSafely(profileRes);
+        const message = typeof payload?.error === 'string' ? payload.error : 'Failed to create profile.';
+
+        if (profileRes.status === 401 && attempt < retryDelays.length - 1) {
+          continue;
+        }
+
+        return { error: new Error(message) };
+      } catch {
+        if (attempt < retryDelays.length - 1) {
+          continue;
+        }
+
+        return { error: new Error('Network error while creating your profile. Please try again.') };
+      }
+    }
+
+    return { error: new Error('Failed to create profile.') };
   };
 
   const fetchProfile = async () => {
@@ -94,14 +194,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    const res = await fetch('/api/profile', { cache: 'no-store' });
-    if (!res.ok) {
-      setProfile(null);
-      return;
-    }
+    try {
+      const res = await fetch('/api/profile', { cache: 'no-store' });
+      if (!res.ok) {
+        setProfile(null);
+        return;
+      }
 
-    const payload = await res.json();
-    setProfile(payload.profile || null);
+      const payload = await parseJsonSafely(res);
+      const nextProfile =
+        payload && typeof payload === 'object' && 'profile' in payload
+          ? ((payload as { profile?: Profile | null }).profile ?? null)
+          : null;
+
+      setProfile(nextProfile);
+    } catch {
+      setProfile(null);
+    }
   };
 
   const refreshProfile = async () => {
@@ -128,6 +237,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { error: new Error('Authentication is not ready yet.') };
       }
 
+      const normalizedEmail = email.trim().toLowerCase();
+      const normalizedUsername = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+      const normalizedDisplayName = displayName.trim() || normalizedUsername;
+
       const signUpParams: {
         emailAddress: string;
         password: string;
@@ -135,15 +248,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         firstName?: string;
         lastName?: string;
       } = {
-        emailAddress: email,
+        emailAddress: normalizedEmail,
         password,
       };
 
-      if (username && supportsSignUpField('username')) {
-        signUpParams.username = username;
+      if (normalizedUsername && supportsSignUpField('username')) {
+        signUpParams.username = normalizedUsername;
       }
 
-      const { firstName, lastName } = splitDisplayName(displayName || username);
+      const { firstName, lastName } = splitDisplayName(normalizedDisplayName || normalizedUsername);
       if (firstName && supportsSignUpField('first_name')) {
         signUpParams.firstName = firstName;
       }
@@ -154,7 +267,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const result = await clerkSignUp.password(signUpParams);
 
       if (result.error) {
-        return { error: new Error(getAuthErrorMessage(result.error, 'Sign up failed')) };
+        return { error: new Error(getAuthErrorMessage(result.error, 'Sign up failed', 'signUp')) };
       }
 
       if (clerkSignUp.status !== 'complete') {
@@ -163,27 +276,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const finalizeResult = await clerkSignUp.finalize();
       if (finalizeResult.error) {
-        return { error: new Error(getAuthErrorMessage(finalizeResult.error, 'Sign up finalization failed')) };
+        return { error: new Error(getAuthErrorMessage(finalizeResult.error, 'Sign up finalization failed', 'signUp')) };
       }
 
-      const profileRes = await fetch('/api/profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username,
-          displayName,
-        }),
-      });
-
-      if (!profileRes.ok) {
-        const payload = await profileRes.json();
-        return { error: new Error(payload.error || 'Failed to create profile.') };
+      const ensuredProfile = await ensureProfile(normalizedUsername, normalizedDisplayName);
+      if (ensuredProfile.error) {
+        return ensuredProfile;
       }
 
-      await fetchProfile();
+      await fetchProfile().catch(() => undefined);
       return { error: null };
     } catch (error: unknown) {
-      return { error: new Error(getAuthErrorMessage(error, 'Sign up failed')) };
+      return { error: new Error(getAuthErrorMessage(error, 'Sign up failed', 'signUp')) };
     }
   };
 
@@ -194,12 +298,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const result = await clerkSignIn.password({
-        identifier: email,
+        identifier: email.trim().toLowerCase(),
         password,
       });
 
       if (result.error) {
-        return { error: new Error(result.error.message || 'Sign in failed') };
+        return { error: new Error(getAuthErrorMessage(result.error, 'Sign in failed', 'signIn')) };
       }
 
       if (clerkSignIn.status !== 'complete') {
@@ -208,13 +312,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const finalizeResult = await clerkSignIn.finalize();
       if (finalizeResult.error) {
-        return { error: new Error(finalizeResult.error.message || 'Sign in finalization failed') };
+        return { error: new Error(getAuthErrorMessage(finalizeResult.error, 'Sign in finalization failed', 'signIn')) };
       }
 
-      await fetchProfile();
+      await fetchProfile().catch(() => undefined);
       return { error: null };
     } catch (error: unknown) {
-      return { error: new Error(getAuthErrorMessage(error, 'Sign in failed')) };
+      return { error: new Error(getAuthErrorMessage(error, 'Sign in failed', 'signIn')) };
     }
   };
 

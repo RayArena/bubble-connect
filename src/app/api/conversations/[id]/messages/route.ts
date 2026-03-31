@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUserId, serializeDoc } from "@/lib/api-helpers";
+import { readJsonBody, requireUserId, serializeDoc } from "@/lib/api-helpers";
 import { getDb } from "@/lib/mongodb";
 
 interface Context {
@@ -53,8 +53,10 @@ export async function POST(request: Request, context: Context) {
   if (authState.error) return authState.error;
 
   const { id: conversationId } = await context.params;
-  const body = await request.json();
-  const content = body.content?.trim();
+  const parsed = await readJsonBody<{ content?: unknown }>(request);
+  if (parsed.error) return parsed.error;
+
+  const content = typeof parsed.body?.content === "string" ? parsed.body.content.trim() : "";
 
   if (!content) {
     return NextResponse.json({ error: "Message content is required" }, { status: 400 });

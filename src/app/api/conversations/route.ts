@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUserId, serializeDoc } from "@/lib/api-helpers";
+import { readJsonBody, requireUserId, serializeDoc } from "@/lib/api-helpers";
 import { getDb } from "@/lib/mongodb";
 
 export async function GET() {
@@ -61,10 +61,14 @@ export async function POST(request: Request) {
   const authState = await requireUserId();
   if (authState.error) return authState.error;
 
-  const body = await request.json();
-  const type = body.type as "dm" | "group";
-  const name = typeof body.name === "string" ? body.name.trim() : null;
-  const memberIds: string[] = Array.isArray(body.memberIds) ? body.memberIds : [];
+  const parsed = await readJsonBody<{ type?: unknown; name?: unknown; memberIds?: unknown }>(request);
+  if (parsed.error) return parsed.error;
+
+  const type = parsed.body?.type;
+  const name = typeof parsed.body?.name === "string" ? parsed.body.name.trim() : null;
+  const memberIds: string[] = Array.isArray(parsed.body?.memberIds)
+    ? parsed.body.memberIds.filter((id): id is string => typeof id === "string").map((id) => id.trim()).filter(Boolean)
+    : [];
 
   if (type === "dm") {
     const friendUserId = memberIds[0];
