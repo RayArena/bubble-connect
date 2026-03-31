@@ -101,9 +101,33 @@ const AuthPage = () => {
     const normalizedDisplayName = displayName.trim() || normalizedUsername;
 
     if (isSignUp) {
-      const { error } = await signUp(normalizedEmail, password, normalizedUsername, normalizedDisplayName);
+      const { error, requiresVerification } = await signUp(
+        normalizedEmail,
+        password,
+        normalizedUsername,
+        normalizedDisplayName
+      );
       if (error) {
         toast({ title: 'Sign up failed', description: error.message, variant: 'destructive' });
+      } else if (requiresVerification) {
+        try {
+          window.sessionStorage.setItem(
+            'pendingSignUp',
+            JSON.stringify({
+              email: normalizedEmail,
+              username: normalizedUsername,
+              displayName: normalizedDisplayName,
+            })
+          );
+        } catch {
+          // Session storage can fail in some browser privacy modes. Continue with route transition.
+        }
+
+        toast({
+          title: 'Verify your email',
+          description: 'We sent a verification code to your email address.',
+        });
+        router.push('/auth/verify');
       } else {
         toast({ title: 'Welcome to Bubble!', description: 'Your account has been created.' });
         router.push('/chat');
