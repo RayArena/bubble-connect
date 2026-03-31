@@ -1,60 +1,64 @@
 import { NextResponse } from "next/server";
-import { readJsonBody, requireUserId, serializeDoc } from "@/lib/api-helpers";
+import { internalServerError, readJsonBody, requireUserId, serializeDoc } from "@/lib/api-helpers";
 import { getDb } from "@/lib/mongodb";
 
 export async function GET() {
-  const authState = await requireUserId();
-  if (authState.error) return authState.error;
+  try {
+    const authState = await requireUserId();
+    if (authState.error) return authState.error;
 
-  const db = await getDb();
-  const members = await db
-    .collection("conversation_members")
-    .find({ user_id: authState.userId })
-    .toArray();
+    const db = await getDb();
+    const members = await db
+      .collection("conversation_members")
+      .find({ user_id: authState.userId })
+      .toArray();
 
-  const ids = members.map((m) => m.conversation_id);
-  if (!ids.length) return NextResponse.json({ conversations: [] });
+    const ids = members.map((m) => m.conversation_id);
+    if (!ids.length) return NextResponse.json({ conversations: [] });
 
-  const conversations = await db
-    .collection("conversations")
-    .find({ id: { $in: ids } })
-    .sort({ updated_at: -1 })
-    .toArray();
+    const conversations = await db
+      .collection("conversations")
+      .find({ id: { $in: ids } })
+      .sort({ updated_at: -1 })
+      .toArray();
 
-  const profiles = db.collection("profiles");
+    const profiles = db.collection("profiles");
 
-  const enriched = await Promise.all(
-    conversations.map(async (conversation) => {
-      if (conversation.type === "dm") {
-        const otherMember = await db.collection("conversation_members").findOne({
-          conversation_id: conversation.id,
-          user_id: { $ne: authState.userId },
-        });
+    const enriched = await Promise.all(
+      conversations.map(async (conversation) => {
+        if (conversation.type === "dm") {
+          const otherMember = await db.collection("conversation_members").findOne({
+            conversation_id: conversation.id,
+            user_id: { $ne: authState.userId },
+          });
 
-        if (otherMember) {
-          const otherUser = await profiles.findOne({ user_id: otherMember.user_id, is_deleted: { $ne: true } });
+          if (otherMember) {
+            const otherUser = await profiles.findOne({ user_id: otherMember.user_id, is_deleted: { $ne: true } });
 
-          if (!otherUser) {
-            return null;
+            if (!otherUser) {
+              return null;
+            }
+
+            return {
+              ...serializeDoc(conversation),
+              otherUser: otherUser ? serializeDoc(otherUser) : null,
+            };
           }
 
-          return {
-            ...serializeDoc(conversation),
-            otherUser: otherUser ? serializeDoc(otherUser) : null,
-          };
+          return null;
         }
 
-        return null;
-      }
+        return {
+          ...serializeDoc(conversation),
+          otherUser: null,
+        };
+      })
+    );
 
-      return {
-        ...serializeDoc(conversation),
-        otherUser: null,
-      };
-    })
-  );
-
-  return NextResponse.json({ conversations: enriched.filter(Boolean) });
+    return NextResponse.json({ conversations: enriched.filter(Boolean) });
+  } catch (error) {
+    return internalServerError(error, "Conversations fetch failed");
+  }
 }
 
 export async function POST(request: Request) {

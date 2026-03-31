@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { clerkClient } from "@clerk/nextjs/server";
 import type { Collection, Document } from "mongodb";
 import { getDb } from "@/lib/mongodb";
-import { badRequest, readJsonBody, requireUserId, serializeDoc, toIsoDate } from "@/lib/api-helpers";
+import { badRequest, internalServerError, readJsonBody, requireUserId, serializeDoc, toIsoDate } from "@/lib/api-helpers";
 import { permanentlyDeleteUserData } from "@/lib/user-lifecycle";
 
 const USERNAME_MIN_LENGTH = 3;
@@ -123,47 +123,55 @@ async function upsertProfileForUser(
 }
 
 export async function GET() {
-  const authState = await requireUserId();
-  if (authState.error) return authState.error;
+  try {
+    const authState = await requireUserId();
+    if (authState.error) return authState.error;
 
-  const db = await getDb();
-  const profiles = db.collection("profiles");
-  const profile = await profiles.findOne({ user_id: authState.userId });
+    const db = await getDb();
+    const profiles = db.collection("profiles");
+    const profile = await profiles.findOne({ user_id: authState.userId });
 
-  if (!profile) {
-    const bootstrapped = await upsertProfileForUser(profiles, authState.userId as string, {});
-    return NextResponse.json({
-      profile: bootstrapped.profile ? serializeDoc(bootstrapped.profile) : null,
-      recovered: true,
-    });
+    if (!profile) {
+      const bootstrapped = await upsertProfileForUser(profiles, authState.userId as string, {});
+      return NextResponse.json({
+        profile: bootstrapped.profile ? serializeDoc(bootstrapped.profile) : null,
+        recovered: true,
+      });
+    }
+
+    if (profile.is_deleted) {
+      await permanentlyDeleteUserData(db, authState.userId as string);
+      return NextResponse.json({ profile: null, deleted: true });
+    }
+
+    return NextResponse.json({ profile: serializeDoc(profile) });
+  } catch (error) {
+    return internalServerError(error, "Profile fetch failed");
   }
-
-  if (profile.is_deleted) {
-    await permanentlyDeleteUserData(db, authState.userId as string);
-    return NextResponse.json({ profile: null, deleted: true });
-  }
-
-  return NextResponse.json({ profile: serializeDoc(profile) });
 }
 
 export async function POST(request: Request) {
-  const authState = await requireUserId();
-  if (authState.error) return authState.error;
+  try {
+    const authState = await requireUserId();
+    if (authState.error) return authState.error;
 
-  const parsed = await readJsonBody<{ username?: string; displayName?: string }>(request);
-  if (parsed.error) return parsed.error;
+    const parsed = await readJsonBody<{ username?: string; displayName?: string }>(request);
+    if (parsed.error) return parsed.error;
 
-  const db = await getDb();
-  const profiles = db.collection("profiles");
-  const upserted = await upsertProfileForUser(profiles, authState.userId as string, {
-    username: parsed.body?.username,
-    displayName: parsed.body?.displayName,
-  });
+    const db = await getDb();
+    const profiles = db.collection("profiles");
+    const upserted = await upsertProfileForUser(profiles, authState.userId as string, {
+      username: parsed.body?.username,
+      displayName: parsed.body?.displayName,
+    });
 
-  return NextResponse.json({
-    profile: upserted.profile ? serializeDoc(upserted.profile) : null,
-    usernameAdjusted: upserted.usernameAdjusted,
-  });
+    return NextResponse.json({
+      profile: upserted.profile ? serializeDoc(upserted.profile) : null,
+      usernameAdjusted: upserted.usernameAdjusted,
+    });
+  } catch (error) {
+    return internalServerError(error, "Profile creation failed");
+  }
 }
 
 export async function PATCH(request: Request) {

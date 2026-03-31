@@ -19,15 +19,29 @@ export function serializeDoc<T>(doc: T) {
 }
 
 export async function requireUserId() {
-  const { userId } = await auth();
-  if (!userId) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return {
+        userId: null,
+        error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+      };
+    }
+
+    return { userId, error: null };
+  } catch (error) {
+    console.error("Auth check failed", error);
     return {
       userId: null,
-      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+      error: NextResponse.json(
+        {
+          error: "Authentication service is not configured correctly on the server.",
+          code: "AUTH_CONFIG_ERROR",
+        },
+        { status: 503 }
+      ),
     };
   }
-
-  return { userId, error: null };
 }
 
 export async function readJsonBody<T>(request: Request) {
@@ -44,4 +58,39 @@ export async function readJsonBody<T>(request: Request) {
 
 export function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
+}
+
+export function internalServerError(error: unknown, fallbackMessage: string) {
+  console.error(fallbackMessage, error);
+
+  const message = error instanceof Error ? error.message : "Unknown error";
+  const lower = message.toLowerCase();
+
+  if (lower.includes("mongodb_uri") || lower.includes("mongo") || lower.includes("ecconn") || lower.includes("server selection")) {
+    return NextResponse.json(
+      {
+        error: "Database is unavailable. Check MongoDB environment variables and network access.",
+        code: "DB_UNAVAILABLE",
+      },
+      { status: 503 }
+    );
+  }
+
+  if (lower.includes("clerk") || lower.includes("publishable") || lower.includes("secret key")) {
+    return NextResponse.json(
+      {
+        error: "Authentication service is not configured correctly on the server.",
+        code: "AUTH_CONFIG_ERROR",
+      },
+      { status: 503 }
+    );
+  }
+
+  return NextResponse.json(
+    {
+      error: fallbackMessage,
+      code: "INTERNAL_ERROR",
+    },
+    { status: 500 }
+  );
 }

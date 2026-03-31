@@ -1,90 +1,94 @@
 import { ObjectId } from "mongodb";
 import { NextRequest, NextResponse } from "next/server";
-import { badRequest, readJsonBody, requireUserId, serializeDoc } from "@/lib/api-helpers";
+import { badRequest, internalServerError, readJsonBody, requireUserId, serializeDoc } from "@/lib/api-helpers";
 import { getDb } from "@/lib/mongodb";
 
 export async function GET(request: NextRequest) {
-  const authState = await requireUserId();
-  if (authState.error) return authState.error;
+  try {
+    const authState = await requireUserId();
+    if (authState.error) return authState.error;
 
-  const type = request.nextUrl.searchParams.get("type") || "pending";
-  const db = await getDb();
-  const friendships = db.collection("friendships");
+    const type = request.nextUrl.searchParams.get("type") || "pending";
+    const db = await getDb();
+    const friendships = db.collection("friendships");
 
-  if (type === "pendingCount") {
-    const count = await friendships.countDocuments({
-      addressee_id: authState.userId,
-      status: "pending",
-    });
-    return NextResponse.json({ count });
-  }
+    if (type === "pendingCount") {
+      const count = await friendships.countDocuments({
+        addressee_id: authState.userId,
+        status: "pending",
+      });
+      return NextResponse.json({ count });
+    }
 
-  if (type === "pending") {
-    const pending = await friendships
-      .find({ addressee_id: authState.userId, status: "pending" })
-      .sort({ created_at: -1 })
-      .toArray();
-    const requesterIds = pending.map((friendship) => friendship.requester_id);
-    const requesters = await db
-      .collection("profiles")
-      .find({ user_id: { $in: requesterIds }, is_deleted: { $ne: true } })
-      .toArray();
+    if (type === "pending") {
+      const pending = await friendships
+        .find({ addressee_id: authState.userId, status: "pending" })
+        .sort({ created_at: -1 })
+        .toArray();
+      const requesterIds = pending.map((friendship) => friendship.requester_id);
+      const requesters = await db
+        .collection("profiles")
+        .find({ user_id: { $in: requesterIds }, is_deleted: { $ne: true } })
+        .toArray();
 
-    const requesterMap: Record<string, unknown> = {};
-    requesters.forEach((requester) => {
-      requesterMap[requester.user_id] = serializeDoc(requester);
-    });
+      const requesterMap: Record<string, unknown> = {};
+      requesters.forEach((requester) => {
+        requesterMap[requester.user_id] = serializeDoc(requester);
+      });
 
-    const pendingWithRequester = pending
-      .map((friendship) => ({
-        ...serializeDoc(friendship),
-        requester: requesterMap[friendship.requester_id] || null,
-      }))
-      .filter((friendship) => Boolean(friendship.requester));
-
-    return NextResponse.json({
-      friendships: pendingWithRequester,
-    });
-  }
-
-  if (type === "friends") {
-    const friends = await friendships
-      .find({
-        status: "accepted",
-        $or: [{ requester_id: authState.userId }, { addressee_id: authState.userId }],
-      })
-      .sort({ updated_at: -1 })
-      .toArray();
-    const friendUserIds = friends.map((friendship) =>
-      friendship.requester_id === authState.userId ? friendship.addressee_id : friendship.requester_id
-    );
-    const profiles = await db
-      .collection("profiles")
-      .find({ user_id: { $in: friendUserIds }, is_deleted: { $ne: true } })
-      .toArray();
-
-    const profileMap: Record<string, unknown> = {};
-    profiles.forEach((profile) => {
-      profileMap[profile.user_id] = serializeDoc(profile);
-    });
-
-    const friendsWithProfiles = friends
-      .map((friendship) => {
-        const friendUserId =
-          friendship.requester_id === authState.userId ? friendship.addressee_id : friendship.requester_id;
-        return {
+      const pendingWithRequester = pending
+        .map((friendship) => ({
           ...serializeDoc(friendship),
-          friend: profileMap[friendUserId] || null,
-        };
-      })
-      .filter((friendship) => Boolean(friendship.friend));
+          requester: requesterMap[friendship.requester_id] || null,
+        }))
+        .filter((friendship) => Boolean(friendship.requester));
 
-    return NextResponse.json({
-      friendships: friendsWithProfiles,
-    });
+      return NextResponse.json({
+        friendships: pendingWithRequester,
+      });
+    }
+
+    if (type === "friends") {
+      const friends = await friendships
+        .find({
+          status: "accepted",
+          $or: [{ requester_id: authState.userId }, { addressee_id: authState.userId }],
+        })
+        .sort({ updated_at: -1 })
+        .toArray();
+      const friendUserIds = friends.map((friendship) =>
+        friendship.requester_id === authState.userId ? friendship.addressee_id : friendship.requester_id
+      );
+      const profiles = await db
+        .collection("profiles")
+        .find({ user_id: { $in: friendUserIds }, is_deleted: { $ne: true } })
+        .toArray();
+
+      const profileMap: Record<string, unknown> = {};
+      profiles.forEach((profile) => {
+        profileMap[profile.user_id] = serializeDoc(profile);
+      });
+
+      const friendsWithProfiles = friends
+        .map((friendship) => {
+          const friendUserId =
+            friendship.requester_id === authState.userId ? friendship.addressee_id : friendship.requester_id;
+          return {
+            ...serializeDoc(friendship),
+            friend: profileMap[friendUserId] || null,
+          };
+        })
+        .filter((friendship) => Boolean(friendship.friend));
+
+      return NextResponse.json({
+        friendships: friendsWithProfiles,
+      });
+    }
+
+    return badRequest("Invalid friendship query type");
+  } catch (error) {
+    return internalServerError(error, "Friendships fetch failed");
   }
-
-  return badRequest("Invalid friendship query type");
 }
 
 export async function POST(request: Request) {

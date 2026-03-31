@@ -1,6 +1,20 @@
 import { MongoClient } from "mongodb";
 
-const uri = process.env.MONGODB_URI || "";
+function resolveMongoUri() {
+  const candidates = [
+    process.env.MONGODB_URI,
+    process.env.MONGODB_URL,
+    process.env.MONGO_URI,
+    process.env.DATABASE_URL,
+  ]
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean);
+
+  const mongoUri = candidates.find((value) => value.startsWith("mongodb://") || value.startsWith("mongodb+srv://"));
+  return mongoUri || "";
+}
+
+const uri = resolveMongoUri();
 const DEFAULT_DB_NAME = "bubble_connect";
 
 declare global {
@@ -59,7 +73,7 @@ async function getMongoClient() {
 
 export async function getDb() {
   if (!uri) {
-    throw new Error("Missing MONGODB_URI environment variable");
+    throw new Error("Missing MongoDB connection string (set MONGODB_URI, MONGODB_URL, MONGO_URI, or DATABASE_URL)");
   }
 
   const client = await getMongoClient();
