@@ -17,22 +17,26 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
   const [convName, setConvName] = useState('');
   const [convType, setConvType] = useState('dm');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const latestServerMessageAtRef = useRef<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
+    setMessages([]);
+    setConvName('');
+    setConvType('dm');
+    latestServerMessageAtRef.current = null;
 
     const hydrate = async () => {
-      await loadConversation();
-      await loadMessages();
+      await Promise.all([loadConversation(), loadMessages(false)]);
     };
 
     void hydrate();
 
     const interval = setInterval(() => {
       if (mounted) {
-        void loadMessages();
+        void loadMessages(true);
       }
-    }, 2000);
+    }, 1200);
 
     return () => {
       mounted = false;
@@ -61,11 +65,46 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
     setConvName(payload.otherUser?.display_name || 'Unknown');
   };
 
-  const loadMessages = async () => {
-    const response = await fetch(`/api/conversations/${conversationId}/messages`, { cache: 'no-store' });
+  const loadMessages = async (incremental: boolean) => {
+    const params = new URLSearchParams();
+    if (incremental && latestServerMessageAtRef.current) {
+      params.set('since', latestServerMessageAtRef.current);
+    }
+
+    const queryString = params.toString();
+    const url = `/api/conversations/${conversationId}/messages${queryString ? `?${queryString}` : ''}`;
+    const response = await fetch(url, { cache: 'no-store' });
     if (!response.ok) return;
+
     const payload = await response.json();
-    setMessages(payload.messages || []);
+    const incomingMessages = (payload.messages || []) as (Message & { sender?: Profile })[];
+
+    if (!incomingMessages.length) {
+      return;
+    }
+
+    const latestMessage = incomingMessages[incomingMessages.length - 1];
+    if (latestMessage?.created_at) {
+      latestServerMessageAtRef.current = latestMessage.created_at;
+    }
+
+    if (!incremental) {
+      setMessages(incomingMessages);
+      return;
+    }
+
+    setMessages((prev) => {
+      const seen = new Set(prev.map((message) => message.id));
+      const merged = [...prev];
+
+      incomingMessages.forEach((message) => {
+        if (!seen.has(message.id)) {
+          merged.push(message);
+        }
+      });
+
+      return merged;
+    });
   };
 
   const sendMessage = async (e: React.FormEvent) => {
@@ -73,22 +112,61 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
     if (!newMessage.trim() || !user) return;
 
     const content = newMessage.trim();
+    const optimisticId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticMessage: Message & { sender?: Profile } = {
+      id: optimisticId,
+      conversation_id: conversationId,
+      sender_id: user.id,
+      content,
+      type: 'text',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      sender: profile || undefined,
+    };
+
     setNewMessage('');
+    setMessages((prev) => [...prev, optimisticMessage]);
 
-    const response = await fetch(`/api/conversations/${conversationId}/messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        content,
-      }),
-    });
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content,
+        }),
+      });
 
-    if (!response.ok) {
+      if (!response.ok) {
+        setMessages((prev) => prev.filter((message) => message.id !== optimisticId));
+        setNewMessage(content);
+        toast({ title: 'Error', description: 'Failed to send message', variant: 'destructive' });
+        return;
+      }
+
+      const payload = await response.json().catch(() => null);
+      const serverMessage = payload?.message as (Message & { sender?: Profile }) | undefined;
+
+      if (!serverMessage?.id) {
+        void loadMessages(true);
+        return;
+      }
+
+      if (serverMessage.created_at) {
+        latestServerMessageAtRef.current = serverMessage.created_at;
+      }
+
+      setMessages((prev) => {
+        const withoutOptimistic = prev.filter((message) => message.id !== optimisticId);
+        if (withoutOptimistic.some((message) => message.id === serverMessage.id)) {
+          return withoutOptimistic;
+        }
+        return [...withoutOptimistic, serverMessage];
+      });
+    } catch {
+      setMessages((prev) => prev.filter((message) => message.id !== optimisticId));
+      setNewMessage(content);
       toast({ title: 'Error', description: 'Failed to send message', variant: 'destructive' });
-      return;
     }
-
-    await loadMessages();
   };
 
   const formatTime = (dateStr: string) => {

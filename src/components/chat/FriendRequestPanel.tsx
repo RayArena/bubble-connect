@@ -24,24 +24,16 @@ const FriendRequestPanel: React.FC<FriendRequestPanelProps> = ({ onClose, onOpen
   useEffect(() => {
     if (!user) return;
 
-    void loadPendingRequests();
-    void loadFriends();
+    void loadFriendshipSummary();
   }, [user]);
 
-  const loadPendingRequests = async () => {
+  const loadFriendshipSummary = async () => {
     if (!user) return;
-    const response = await fetch('/api/friendships?type=pending', { cache: 'no-store' });
+    const response = await fetch('/api/friendships?type=summary', { cache: 'no-store' });
     if (!response.ok) return;
     const payload = await response.json();
-    setPendingRequests(payload.friendships || []);
-  };
-
-  const loadFriends = async () => {
-    if (!user) return;
-    const response = await fetch('/api/friendships?type=friends', { cache: 'no-store' });
-    if (!response.ok) return;
-    const payload = await response.json();
-    setFriends(payload.friendships || []);
+    setPendingRequests(payload.pending || []);
+    setFriends(payload.friends || []);
   };
 
   const searchUsers = async () => {
@@ -96,8 +88,7 @@ const FriendRequestPanel: React.FC<FriendRequestPanelProps> = ({ onClose, onOpen
       toast({ title: 'Error', description: 'Could not update request', variant: 'destructive' });
     }
 
-    loadPendingRequests();
-    loadFriends();
+    void loadFriendshipSummary();
   };
 
   const startDM = async (friendUserId: string) => {

@@ -12,50 +12,112 @@ export async function GET() {
     const db = await getDb();
     const members = await db
       .collection("conversation_members")
-      .find({ user_id: authState.userId })
+      .find(
+        { user_id: authState.userId },
+        { projection: { _id: 0, conversation_id: 1 } }
+      )
       .toArray();
 
-    const ids = members.map((m) => m.conversation_id);
+    const ids = Array.from(new Set(members.map((m) => m.conversation_id)));
     if (!ids.length) return NextResponse.json({ conversations: [] });
 
     const conversations = await db
       .collection("conversations")
-      .find({ id: { $in: ids } })
+      .find(
+        { id: { $in: ids } },
+        {
+          projection: {
+            _id: 1,
+            id: 1,
+            type: 1,
+            name: 1,
+            avatar_url: 1,
+            created_by: 1,
+            created_at: 1,
+            updated_at: 1,
+          },
+        }
+      )
       .sort({ updated_at: -1 })
       .toArray();
 
-    const profiles = db.collection("profiles");
+    const dmConversationIds = conversations
+      .filter((conversation) => conversation.type === "dm")
+      .map((conversation) => conversation.id);
 
-    const enriched = await Promise.all(
-      conversations.map(async (conversation) => {
-        if (conversation.type === "dm") {
-          const otherMember = await db.collection("conversation_members").findOne({
-            conversation_id: conversation.id,
+    const otherMemberByConversation = new Map<string, string>();
+    if (dmConversationIds.length) {
+      const otherMembers = await db
+        .collection("conversation_members")
+        .find(
+          {
+            conversation_id: { $in: dmConversationIds },
             user_id: { $ne: authState.userId },
-          });
+          },
+          { projection: { _id: 0, conversation_id: 1, user_id: 1 } }
+        )
+        .toArray();
 
-          if (otherMember) {
-            const otherUser = await profiles.findOne({ user_id: otherMember.user_id, is_deleted: { $ne: true } });
-
-            if (!otherUser) {
-              return null;
-            }
-
-            return {
-              ...serializeDoc(conversation),
-              otherUser: otherUser ? serializeDoc(otherUser) : null,
-            };
-          }
-
-          return null;
+      otherMembers.forEach((member) => {
+        if (!otherMemberByConversation.has(member.conversation_id)) {
+          otherMemberByConversation.set(member.conversation_id, member.user_id);
         }
+      });
+    }
 
+    const otherUserIds = Array.from(new Set(Array.from(otherMemberByConversation.values())));
+    const profileMap = new Map<string, ReturnType<typeof serializeDoc>>();
+
+    if (otherUserIds.length) {
+      const profiles = await db
+        .collection("profiles")
+        .find(
+          { user_id: { $in: otherUserIds }, is_deleted: { $ne: true } },
+          {
+            projection: {
+              _id: 1,
+              id: 1,
+              user_id: 1,
+              username: 1,
+              display_name: 1,
+              avatar_url: 1,
+              bio: 1,
+              status: 1,
+              created_at: 1,
+              updated_at: 1,
+            },
+          }
+        )
+        .toArray();
+
+      profiles.forEach((profile) => {
+        profileMap.set(profile.user_id, serializeDoc(profile));
+      });
+    }
+
+    const enriched = conversations.map((conversation) => {
+      if (conversation.type !== "dm") {
         return {
           ...serializeDoc(conversation),
           otherUser: null,
         };
-      })
-    );
+      }
+
+      const otherUserId = otherMemberByConversation.get(conversation.id);
+      if (!otherUserId) {
+        return null;
+      }
+
+      const otherUser = profileMap.get(otherUserId);
+      if (!otherUser) {
+        return null;
+      }
+
+      return {
+        ...serializeDoc(conversation),
+        otherUser,
+      };
+    });
 
     return NextResponse.json({ conversations: enriched.filter(Boolean) });
   } catch (error) {

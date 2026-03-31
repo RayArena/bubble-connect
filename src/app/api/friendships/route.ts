@@ -5,6 +5,19 @@ import { getDb } from "@/lib/mongodb";
 
 export const runtime = "nodejs";
 
+const PROFILE_PROJECTION = {
+  _id: 1,
+  id: 1,
+  user_id: 1,
+  username: 1,
+  display_name: 1,
+  avatar_url: 1,
+  bio: 1,
+  status: 1,
+  created_at: 1,
+  updated_at: 1,
+};
+
 export async function GET(request: NextRequest) {
   try {
     const authState = await requireUserId();
@@ -13,6 +26,70 @@ export async function GET(request: NextRequest) {
     const type = request.nextUrl.searchParams.get("type") || "pending";
     const db = await getDb();
     const friendships = db.collection("friendships");
+
+    if (type === "summary") {
+      const [pending, friends] = await Promise.all([
+        friendships
+          .find(
+            { addressee_id: authState.userId, status: "pending" },
+            { projection: { _id: 1, requester_id: 1, addressee_id: 1, status: 1, created_at: 1, updated_at: 1 } }
+          )
+          .sort({ created_at: -1 })
+          .toArray(),
+        friendships
+          .find(
+            {
+              status: "accepted",
+              $or: [{ requester_id: authState.userId }, { addressee_id: authState.userId }],
+            },
+            { projection: { _id: 1, requester_id: 1, addressee_id: 1, status: 1, created_at: 1, updated_at: 1 } }
+          )
+          .sort({ updated_at: -1 })
+          .toArray(),
+      ]);
+
+      const requesterIds = pending.map((friendship) => friendship.requester_id);
+      const friendUserIds = friends.map((friendship) =>
+        friendship.requester_id === authState.userId ? friendship.addressee_id : friendship.requester_id
+      );
+      const allProfileIds = Array.from(new Set([...requesterIds, ...friendUserIds]));
+
+      const profiles = allProfileIds.length
+        ? await db
+            .collection("profiles")
+            .find({ user_id: { $in: allProfileIds }, is_deleted: { $ne: true } }, { projection: PROFILE_PROJECTION })
+            .toArray()
+        : [];
+
+      const profileMap: Record<string, unknown> = {};
+      profiles.forEach((profile) => {
+        profileMap[profile.user_id] = serializeDoc(profile);
+      });
+
+      const pendingWithRequester = pending
+        .map((friendship) => ({
+          ...serializeDoc(friendship),
+          requester: profileMap[friendship.requester_id] || null,
+        }))
+        .filter((friendship) => Boolean(friendship.requester));
+
+      const friendsWithProfiles = friends
+        .map((friendship) => {
+          const friendUserId =
+            friendship.requester_id === authState.userId ? friendship.addressee_id : friendship.requester_id;
+          return {
+            ...serializeDoc(friendship),
+            friend: profileMap[friendUserId] || null,
+          };
+        })
+        .filter((friendship) => Boolean(friendship.friend));
+
+      return NextResponse.json({
+        pending: pendingWithRequester,
+        friends: friendsWithProfiles,
+        pendingCount: pendingWithRequester.length,
+      });
+    }
 
     if (type === "pendingCount") {
       const count = await friendships.countDocuments({
@@ -24,13 +101,21 @@ export async function GET(request: NextRequest) {
 
     if (type === "pending") {
       const pending = await friendships
-        .find({ addressee_id: authState.userId, status: "pending" })
+        .find(
+          { addressee_id: authState.userId, status: "pending" },
+          { projection: { _id: 1, requester_id: 1, addressee_id: 1, status: 1, created_at: 1, updated_at: 1 } }
+        )
         .sort({ created_at: -1 })
         .toArray();
+
       const requesterIds = pending.map((friendship) => friendship.requester_id);
+      if (!requesterIds.length) {
+        return NextResponse.json({ friendships: [] });
+      }
+
       const requesters = await db
         .collection("profiles")
-        .find({ user_id: { $in: requesterIds }, is_deleted: { $ne: true } })
+        .find({ user_id: { $in: requesterIds }, is_deleted: { $ne: true } }, { projection: PROFILE_PROJECTION })
         .toArray();
 
       const requesterMap: Record<string, unknown> = {};
@@ -55,15 +140,20 @@ export async function GET(request: NextRequest) {
         .find({
           status: "accepted",
           $or: [{ requester_id: authState.userId }, { addressee_id: authState.userId }],
-        })
+        }, { projection: { _id: 1, requester_id: 1, addressee_id: 1, status: 1, created_at: 1, updated_at: 1 } })
         .sort({ updated_at: -1 })
         .toArray();
+
       const friendUserIds = friends.map((friendship) =>
         friendship.requester_id === authState.userId ? friendship.addressee_id : friendship.requester_id
       );
+      if (!friendUserIds.length) {
+        return NextResponse.json({ friendships: [] });
+      }
+
       const profiles = await db
         .collection("profiles")
-        .find({ user_id: { $in: friendUserIds }, is_deleted: { $ne: true } })
+        .find({ user_id: { $in: friendUserIds }, is_deleted: { $ne: true } }, { projection: PROFILE_PROJECTION })
         .toArray();
 
       const profileMap: Record<string, unknown> = {};

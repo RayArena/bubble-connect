@@ -19,18 +19,28 @@ const DEFAULT_DB_NAME = "bubble_connect";
 
 declare global {
   var _mongoClientPromise: Promise<MongoClient> | undefined;
+  var _mongoIndexesEnsuredPromise: Promise<void> | undefined;
 }
 
 let mongoClientPromise: Promise<MongoClient> | null = global._mongoClientPromise || null;
+let mongoIndexesEnsuredPromise: Promise<void> | null = global._mongoIndexesEnsuredPromise || null;
 
 if (process.env.NODE_ENV !== "production") {
   global._mongoClientPromise = mongoClientPromise || undefined;
+  global._mongoIndexesEnsuredPromise = mongoIndexesEnsuredPromise || undefined;
 }
 
 function resetMongoClientPromise() {
   mongoClientPromise = null;
   if (process.env.NODE_ENV !== "production") {
     global._mongoClientPromise = undefined;
+  }
+}
+
+function resetMongoIndexesPromise() {
+  mongoIndexesEnsuredPromise = null;
+  if (process.env.NODE_ENV !== "production") {
+    global._mongoIndexesEnsuredPromise = undefined;
   }
 }
 
@@ -71,6 +81,49 @@ async function getMongoClient() {
   return mongoClientPromise;
 }
 
+async function ensureIndexes(client: MongoClient, dbName: string) {
+  if (!mongoIndexesEnsuredPromise) {
+    mongoIndexesEnsuredPromise = (async () => {
+      const db = client.db(dbName);
+
+      await Promise.all([
+        db.collection("profiles").createIndexes([
+          { key: { user_id: 1 }, name: "profiles_user_id" },
+          { key: { username: 1 }, name: "profiles_username" },
+        ]),
+        db.collection("conversation_members").createIndexes([
+          { key: { user_id: 1, conversation_id: 1 }, name: "conversation_members_user_conversation" },
+          { key: { conversation_id: 1, user_id: 1 }, name: "conversation_members_conversation_user" },
+        ]),
+        db.collection("conversations").createIndexes([
+          { key: { id: 1 }, name: "conversations_id" },
+          { key: { updated_at: -1 }, name: "conversations_updated_at" },
+        ]),
+        db.collection("messages").createIndexes([
+          { key: { id: 1 }, name: "messages_id" },
+          { key: { conversation_id: 1, created_at: 1 }, name: "messages_conversation_created" },
+        ]),
+        db.collection("friendships").createIndexes([
+          { key: { addressee_id: 1, status: 1, created_at: -1 }, name: "friendships_addressee_status_created" },
+          { key: { requester_id: 1, addressee_id: 1 }, name: "friendships_requester_addressee" },
+          { key: { addressee_id: 1, requester_id: 1 }, name: "friendships_addressee_requester" },
+          { key: { status: 1, requester_id: 1, addressee_id: 1 }, name: "friendships_status_participants" },
+        ]),
+      ]);
+    })().catch((error) => {
+      // Do not block requests if index creation fails; retry on later requests.
+      resetMongoIndexesPromise();
+      console.error("Mongo index bootstrap failed", error);
+    });
+
+    if (process.env.NODE_ENV !== "production") {
+      global._mongoIndexesEnsuredPromise = mongoIndexesEnsuredPromise;
+    }
+  }
+
+  await mongoIndexesEnsuredPromise;
+}
+
 export async function getDb() {
   if (!uri) {
     throw new Error("Missing MongoDB connection string (set MONGODB_URI, MONGODB_URL, MONGO_URI, or DATABASE_URL)");
@@ -78,5 +131,6 @@ export async function getDb() {
 
   const client = await getMongoClient();
   const dbName = getDbNameFromUri(uri);
+  void ensureIndexes(client, dbName);
   return client.db(dbName);
 }

@@ -6,7 +6,7 @@ interface Context {
   params: Promise<{ id: string }>;
 }
 
-export async function GET(_request: Request, context: Context) {
+export async function GET(request: Request, context: Context) {
   const authState = await requireUserId();
   if (authState.error) return authState.error;
 
@@ -22,18 +22,56 @@ export async function GET(_request: Request, context: Context) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  const sinceParam = new URL(request.url).searchParams.get("since");
+  const sinceDate = sinceParam ? new Date(sinceParam) : null;
+  const hasValidSince = Boolean(sinceDate && !Number.isNaN(sinceDate.getTime()));
+
+  const messageQuery: Record<string, unknown> = { conversation_id: conversationId };
+  if (hasValidSince && sinceDate) {
+    messageQuery.created_at = { $gte: sinceDate };
+  }
+
   const messages = await db
     .collection("messages")
-    .find({ conversation_id: conversationId })
+    .find(messageQuery, {
+      projection: {
+        _id: 1,
+        id: 1,
+        conversation_id: 1,
+        sender_id: 1,
+        content: 1,
+        type: 1,
+        created_at: 1,
+        updated_at: 1,
+      },
+    })
     .sort({ created_at: 1 })
     .limit(100)
     .toArray();
 
   const senderIds = Array.from(new Set(messages.map((m) => m.sender_id)));
-  const senders = await db
-    .collection("profiles")
-    .find({ user_id: { $in: senderIds }, is_deleted: { $ne: true } })
-    .toArray();
+  const senders = senderIds.length
+    ? await db
+        .collection("profiles")
+        .find(
+          { user_id: { $in: senderIds }, is_deleted: { $ne: true } },
+          {
+            projection: {
+              _id: 1,
+              id: 1,
+              user_id: 1,
+              username: 1,
+              display_name: 1,
+              avatar_url: 1,
+              bio: 1,
+              status: 1,
+              created_at: 1,
+              updated_at: 1,
+            },
+          }
+        )
+        .toArray()
+    : [];
 
   const senderMap: Record<string, ReturnType<typeof serializeDoc>> = {};
   senders.forEach((sender) => {
@@ -89,5 +127,5 @@ export async function POST(request: Request, context: Context) {
     .collection("conversations")
     .updateOne({ id: conversationId }, { $set: { updated_at: now } });
 
-  return NextResponse.json({ message: newMessage });
+  return NextResponse.json({ message: serializeDoc(newMessage) });
 }
