@@ -176,6 +176,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
 
         if (profileRes.ok) {
+          const payload = await parseJsonSafely(profileRes);
+          const createdProfile =
+            payload && typeof payload === 'object' && 'profile' in payload
+              ? ((payload as { profile?: Profile | null }).profile ?? null)
+              : null;
+
+          if (createdProfile) {
+            setProfile(createdProfile);
+          }
+
           return { error: null };
         }
 
@@ -190,6 +200,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (profileCheckRes?.ok) {
           const profilePayload = await parseJsonSafely(profileCheckRes);
           if (profilePayload && 'profile' in profilePayload && profilePayload.profile) {
+            setProfile(profilePayload.profile as Profile);
             return { error: null };
           }
         }
@@ -204,6 +215,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (profileCheckRes?.ok) {
           const profilePayload = await parseJsonSafely(profileCheckRes);
           if (profilePayload && 'profile' in profilePayload && profilePayload.profile) {
+            setProfile(profilePayload.profile as Profile);
             return { error: null };
           }
         }
@@ -217,7 +229,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchProfile = async () => {
     if (!clerkUser?.id) {
-      setProfile(null);
       return null;
     }
 
@@ -377,7 +388,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      await fetchProfile().catch(() => undefined);
+      if (clerkUser?.id) {
+        await fetchProfile().catch(() => undefined);
+      }
       return { error: null, requiresVerification: false };
     } catch (error: unknown) {
       return {
@@ -433,7 +446,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      await fetchProfile().catch(() => undefined);
+      if (clerkUser?.id) {
+        await fetchProfile().catch(() => undefined);
+      }
       return { error: null };
     } catch (error: unknown) {
       return {
