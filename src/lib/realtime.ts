@@ -1,15 +1,9 @@
-import { publishRedis } from "@/lib/upstash-redis";
+import { publishRedis, isRedisConfigured } from "@/lib/upstash-redis";
+import { REALTIME_CHANNEL, roomForUser, roomForConversation } from "@/lib/realtime-constants";
+import { getGlobalIo } from "@/lib/socket-server";
 import type { RealtimeEnvelope, RealtimeEvent } from "@/types/realtime";
 
-export const REALTIME_CHANNEL = "realtime:events";
-
-export function roomForUser(userId: string) {
-  return `user:${userId}`;
-}
-
-export function roomForConversation(conversationId: string) {
-  return `conversation:${conversationId}`;
-}
+export { REALTIME_CHANNEL, roomForUser, roomForConversation };
 
 export async function publishRealtimeEvent<TData = unknown>(
   rooms: string[],
@@ -30,5 +24,23 @@ export async function publishRealtimeEvent<TData = unknown>(
     event,
   };
 
-  return publishRedis(REALTIME_CHANNEL, JSON.stringify(envelope));
+  // Prefer Redis publish when configured (works across processes/instances)
+  if (isRedisConfigured()) {
+    return publishRedis(REALTIME_CHANNEL, JSON.stringify(envelope));
+  }
+
+  // Local in-process fallback: emit directly to Socket.IO if available
+  try {
+    const io = getGlobalIo();
+    if (!io) return false;
+
+    uniqueRooms.forEach((room) => {
+      io.to(room).emit("realtime:event", event);
+    });
+
+    return true;
+  } catch (error) {
+    console.error("Local realtime emit failed", error);
+    return false;
+  }
 }

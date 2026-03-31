@@ -4,13 +4,19 @@ import type { Server as HttpServer } from "http";
 import { Server as SocketIOServer, type Socket } from "socket.io";
 import { createClient } from "redis";
 import { getDb } from "@/lib/mongodb";
-import { REALTIME_CHANNEL, roomForConversation, roomForUser } from "@/lib/realtime";
+import { REALTIME_CHANNEL, roomForConversation, roomForUser } from "@/lib/realtime-constants";
 import { getRedisUrl } from "@/lib/upstash-redis";
 import type { RealtimeEnvelope } from "@/types/realtime";
 
 interface SocketServerState extends HttpServer {
   io?: SocketIOServer;
   redisSubscriber?: ReturnType<typeof createClient>;
+}
+
+let globalIo: SocketIOServer | undefined;
+
+export function getGlobalIo() {
+  return globalIo;
 }
 
 interface SocketWithUser extends Socket {
@@ -147,6 +153,7 @@ export function initializeSocketServer(server: HttpServer) {
   });
 
   socketServer.io = io;
+  globalIo = io;
   void initializeRedisSubscriber(io, socketServer);
   return io;
 }
