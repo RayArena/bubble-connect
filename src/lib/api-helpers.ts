@@ -8,11 +8,13 @@ export function toIsoDate(value: Date | string | undefined) {
 }
 
 export function serializeDoc<T>(doc: T) {
-  const source = doc as T & { _id?: ObjectId };
+  const source = doc as T & { _id?: ObjectId; id?: unknown };
   const { _id, ...rest } = source;
+  const explicitId = typeof source.id === "string" && source.id.trim() ? source.id : null;
+
   return {
     ...rest,
-    id: _id?.toString() || "",
+    id: explicitId || _id?.toString() || "",
   };
 }
 

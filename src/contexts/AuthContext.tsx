@@ -158,7 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const ensureProfile = async (username: string, displayName: string) => {
-    const retryDelays = [0, 250, 600];
+    const retryDelays = [0, 300, 700, 1200, 2000, 3000];
 
     for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
       if (retryDelays[attempt] > 0) {
@@ -182,14 +182,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const payload = await parseJsonSafely(profileRes);
         const message = typeof payload?.error === 'string' ? payload.error : 'Failed to create profile.';
 
-        if (profileRes.status === 401 && attempt < retryDelays.length - 1) {
+        if ((profileRes.status === 401 || profileRes.status === 403) && attempt < retryDelays.length - 1) {
           continue;
+        }
+
+        const profileCheckRes = await fetch('/api/profile', { cache: 'no-store' }).catch(() => null);
+        if (profileCheckRes?.ok) {
+          const profilePayload = await parseJsonSafely(profileCheckRes);
+          if (profilePayload && 'profile' in profilePayload && profilePayload.profile) {
+            return { error: null };
+          }
         }
 
         return { error: new Error(message) };
       } catch {
         if (attempt < retryDelays.length - 1) {
           continue;
+        }
+
+        const profileCheckRes = await fetch('/api/profile', { cache: 'no-store' }).catch(() => null);
+        if (profileCheckRes?.ok) {
+          const profilePayload = await parseJsonSafely(profileCheckRes);
+          if (profilePayload && 'profile' in profilePayload && profilePayload.profile) {
+            return { error: null };
+          }
         }
 
         return { error: new Error('Network error while creating your profile. Please try again.') };

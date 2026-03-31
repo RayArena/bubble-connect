@@ -17,7 +17,13 @@ const ChatPage = () => {
       />
       <div className="flex-1 flex">
         {showFriendRequests ? (
-          <FriendRequestPanel onClose={() => setShowFriendRequests(false)} />
+          <FriendRequestPanel
+            onClose={() => setShowFriendRequests(false)}
+            onOpenConversation={(conversationId) => {
+              setActiveConversationId(conversationId);
+              setShowFriendRequests(false);
+            }}
+          />
         ) : activeConversationId ? (
           <ChatArea conversationId={activeConversationId} />
         ) : (

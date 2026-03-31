@@ -56,6 +56,13 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     return name.charAt(0).toUpperCase();
   };
 
+  const handleGroupCreated = async (conversationId?: string) => {
+    await loadConversations();
+    if (conversationId) {
+      onSelectConversation(conversationId);
+    }
+  };
+
   return (
     <>
       <div className="w-80 bg-card border-r border-border flex flex-col h-full">
@@ -149,7 +156,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
         </div>
       </div>
 
-      <CreateGroupDialog open={showCreateGroup} onOpenChange={setShowCreateGroup} onCreated={loadConversations} />
+      <CreateGroupDialog open={showCreateGroup} onOpenChange={setShowCreateGroup} onCreated={handleGroupCreated} />
     </>
   );
 };

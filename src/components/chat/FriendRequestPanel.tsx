@@ -8,10 +8,11 @@ import type { Friendship, Profile } from '@/types/db';
 
 interface FriendRequestPanelProps {
   onClose: () => void;
+  onOpenConversation: (conversationId: string) => void;
 }
 
-const FriendRequestPanel: React.FC<FriendRequestPanelProps> = ({ onClose }) => {
-  const { profile, user } = useAuth();
+const FriendRequestPanel: React.FC<FriendRequestPanelProps> = ({ onClose, onOpenConversation }) => {
+  const { user } = useAuth();
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Profile[]>([]);
@@ -21,9 +22,11 @@ const FriendRequestPanel: React.FC<FriendRequestPanelProps> = ({ onClose }) => {
   const [tab, setTab] = useState<'add' | 'pending' | 'friends'>('add');
 
   useEffect(() => {
-    loadPendingRequests();
-    loadFriends();
-  }, []);
+    if (!user) return;
+
+    void loadPendingRequests();
+    void loadFriends();
+  }, [user]);
 
   const loadPendingRequests = async () => {
     if (!user) return;
@@ -113,6 +116,11 @@ const FriendRequestPanel: React.FC<FriendRequestPanelProps> = ({ onClose }) => {
 
     const payload = await response.json();
     toast({ title: payload.existed ? 'Conversation exists' : 'DM created!' });
+
+    if (payload?.conversation?.id) {
+      onOpenConversation(payload.conversation.id);
+      onClose();
+    }
   };
 
   return (

@@ -12,7 +12,7 @@ import type { Profile } from '@/types/db';
 interface CreateGroupDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated: () => void;
+  onCreated: (conversationId?: string) => void;
 }
 
 const CreateGroupDialog: React.FC<CreateGroupDialogProps> = ({ open, onOpenChange, onCreated }) => {
@@ -61,11 +61,13 @@ const CreateGroupDialog: React.FC<CreateGroupDialogProps> = ({ open, onOpenChang
       return;
     }
 
+    const payload = await response.json();
+
     toast({ title: 'Group created!' });
     setGroupName('');
     setSelectedFriends([]);
     onOpenChange(false);
-    onCreated();
+    onCreated(payload?.conversation?.id);
     setCreating(false);
   };
 
