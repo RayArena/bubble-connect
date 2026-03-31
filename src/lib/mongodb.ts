@@ -32,8 +32,15 @@ function getDbNameFromUri(connectionString: string) {
 
 async function getMongoClient() {
   if (!mongoClientPromise) {
+    const timeoutMs = 10_000;
     mongoClientPromise = new MongoClient(uri, {
-      serverSelectionTimeoutMS: 10_000,
+      // Atlas endpoints can misbehave on some VPN/IPv6 routes; prefer stable IPv4 selection.
+      family: 4,
+      autoSelectFamily: true,
+      autoSelectFamilyAttemptTimeout: 5_000,
+      serverSelectionTimeoutMS: timeoutMs,
+      connectTimeoutMS: timeoutMs,
+      socketTimeoutMS: timeoutMs,
     })
       .connect()
       .catch((error) => {

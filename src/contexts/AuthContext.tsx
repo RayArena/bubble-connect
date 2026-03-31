@@ -32,7 +32,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const supportsSignUpField = (field: string) => {
+    if (!clerkSignUp) return false;
+    return (
+      clerkSignUp.requiredFields.includes(field as never) ||
+      clerkSignUp.optionalFields.includes(field as never)
+    );
+  };
+
+  const splitDisplayName = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return { firstName: '', lastName: '' };
+
+    const parts = trimmed.split(/\s+/).filter(Boolean);
+    const firstName = parts[0] || '';
+    const lastName = parts.slice(1).join(' ');
+
+    return { firstName, lastName };
+  };
+
   const getAuthErrorMessage = (error: unknown, fallback: string) => {
+    if (typeof error === 'object' && error !== null) {
+      const maybeClerk = error as {
+        longMessage?: string;
+        message?: string;
+        errors?: Array<{ longMessage?: string; message?: string; code?: string }>;
+      };
+
+      if (typeof maybeClerk.longMessage === 'string' && maybeClerk.longMessage) {
+        return maybeClerk.longMessage;
+      }
+
+      const nested = maybeClerk.errors;
+      if (Array.isArray(nested) && nested[0]) {
+        if (nested[0].longMessage) return nested[0].longMessage;
+        if (nested[0].message) return nested[0].message;
+      }
+
+      if (typeof maybeClerk.message === 'string' && maybeClerk.message) {
+        return maybeClerk.message;
+      }
+    }
+
     if (error instanceof Error && error.message) {
       return error.message;
     }
@@ -87,15 +128,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { error: new Error('Authentication is not ready yet.') };
       }
 
-      const result = await clerkSignUp.password({
+      const signUpParams: {
+        emailAddress: string;
+        password: string;
+        username?: string;
+        firstName?: string;
+        lastName?: string;
+      } = {
         emailAddress: email,
         password,
-        username,
-        firstName: displayName,
-      });
+      };
+
+      if (username && supportsSignUpField('username')) {
+        signUpParams.username = username;
+      }
+
+      const { firstName, lastName } = splitDisplayName(displayName || username);
+      if (firstName && supportsSignUpField('first_name')) {
+        signUpParams.firstName = firstName;
+      }
+      if (lastName && supportsSignUpField('last_name')) {
+        signUpParams.lastName = lastName;
+      }
+
+      const result = await clerkSignUp.password(signUpParams);
 
       if (result.error) {
-        return { error: new Error(result.error.message || 'Sign up failed') };
+        return { error: new Error(getAuthErrorMessage(result.error, 'Sign up failed')) };
       }
 
       if (clerkSignUp.status !== 'complete') {
@@ -104,7 +163,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const finalizeResult = await clerkSignUp.finalize();
       if (finalizeResult.error) {
-        return { error: new Error(finalizeResult.error.message || 'Sign up finalization failed') };
+        return { error: new Error(getAuthErrorMessage(finalizeResult.error, 'Sign up finalization failed')) };
       }
 
       const profileRes = await fetch('/api/profile', {
