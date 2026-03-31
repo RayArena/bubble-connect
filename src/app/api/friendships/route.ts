@@ -1,6 +1,6 @@
 import { ObjectId } from "mongodb";
 import { NextRequest, NextResponse } from "next/server";
-import { badRequest, requireUserId, serializeDoc } from "@/lib/api-helpers";
+import { badRequest, readJsonBody, requireUserId, serializeDoc } from "@/lib/api-helpers";
 import { getDb } from "@/lib/mongodb";
 
 export async function GET(request: NextRequest) {
@@ -91,7 +91,10 @@ export async function POST(request: Request) {
   const authState = await requireUserId();
   if (authState.error) return authState.error;
 
-  const { addresseeId } = await request.json();
+  const parsed = await readJsonBody<{ addresseeId?: unknown }>(request);
+  if (parsed.error) return parsed.error;
+
+  const addresseeId = typeof parsed.body?.addresseeId === "string" ? parsed.body.addresseeId.trim() : "";
   if (!addresseeId) {
     return badRequest("addresseeId is required");
   }
@@ -138,12 +141,24 @@ export async function PATCH(request: Request) {
   const authState = await requireUserId();
   if (authState.error) return authState.error;
 
-  const { friendshipId, accept } = await request.json();
+  const parsed = await readJsonBody<{ friendshipId?: unknown; accept?: unknown }>(request);
+  if (parsed.error) return parsed.error;
+
+  const friendshipId =
+    typeof parsed.body?.friendshipId === "string" ? parsed.body.friendshipId.trim() : "";
+  const accept = parsed.body?.accept === true;
   if (!friendshipId) return badRequest("friendshipId is required");
+
+  let friendshipObjectId: ObjectId;
+  try {
+    friendshipObjectId = new ObjectId(friendshipId);
+  } catch {
+    return badRequest("Invalid friendshipId");
+  }
 
   const db = await getDb();
   const friendships = db.collection("friendships");
-  const target = await friendships.findOne({ _id: new ObjectId(friendshipId) });
+  const target = await friendships.findOne({ _id: friendshipObjectId });
 
   if (!target || target.addressee_id !== authState.userId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -151,11 +166,11 @@ export async function PATCH(request: Request) {
 
   if (accept) {
     await friendships.updateOne(
-      { _id: new ObjectId(friendshipId) },
+      { _id: friendshipObjectId },
       { $set: { status: "accepted", updated_at: new Date() } }
     );
   } else {
-    await friendships.deleteOne({ _id: new ObjectId(friendshipId) });
+    await friendships.deleteOne({ _id: friendshipObjectId });
   }
 
   return NextResponse.json({ ok: true });

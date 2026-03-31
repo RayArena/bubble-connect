@@ -1,8 +1,43 @@
 import { NextResponse } from "next/server";
 import { clerkClient } from "@clerk/nextjs/server";
+import type { Collection, Document } from "mongodb";
 import { getDb } from "@/lib/mongodb";
-import { badRequest, requireUserId, serializeDoc, toIsoDate } from "@/lib/api-helpers";
+import { badRequest, readJsonBody, requireUserId, serializeDoc, toIsoDate } from "@/lib/api-helpers";
 import { permanentlyDeleteUserData } from "@/lib/user-lifecycle";
+
+const USERNAME_MIN_LENGTH = 3;
+const USERNAME_MAX_LENGTH = 30;
+
+function normalizeUsername(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, USERNAME_MAX_LENGTH);
+}
+
+async function resolveUniqueUsername(
+  profiles: Collection<Document>,
+  requestedUsername: string,
+  userId: string
+) {
+  const base = requestedUsername;
+  let candidate = base;
+  let attempt = 0;
+
+  while (attempt < 30) {
+    const existing = await profiles.findOne({ username: candidate }, { projection: { _id: 1, user_id: 1 } });
+    if (!existing || existing.user_id === userId) {
+      return candidate;
+    }
+
+    attempt += 1;
+    const suffix = `_${attempt}`;
+    candidate = `${base.slice(0, USERNAME_MAX_LENGTH - suffix.length)}${suffix}`;
+  }
+
+  return `${base.slice(0, USERNAME_MAX_LENGTH - 3)}_99`;
+}
 
 export async function GET() {
   const authState = await requireUserId();
@@ -27,32 +62,26 @@ export async function POST(request: Request) {
   const authState = await requireUserId();
   if (authState.error) return authState.error;
 
-  const body = await request.json();
-  const username = body.username?.trim().toLowerCase();
-  const displayName = body.displayName?.trim();
+  const parsed = await readJsonBody<{ username?: string; displayName?: string }>(request);
+  if (parsed.error) return parsed.error;
 
-  if (!username || username.length < 3) {
+  const username = normalizeUsername(parsed.body?.username || "");
+  const displayName = (parsed.body?.displayName || "").trim() || username;
+
+  if (!username || username.length < USERNAME_MIN_LENGTH) {
     return badRequest("Username must be at least 3 characters");
-  }
-
-  if (!displayName) {
-    return badRequest("Display name is required");
   }
 
   const db = await getDb();
   const profiles = db.collection("profiles");
+  const resolvedUsername = await resolveUniqueUsername(profiles, username, authState.userId as string);
   const now = new Date();
-
-  const existingByUsername = await profiles.findOne({ username, user_id: { $ne: authState.userId } });
-  if (existingByUsername) {
-    return badRequest("Username already taken");
-  }
 
   await profiles.updateOne(
     { user_id: authState.userId },
     {
       $set: {
-        username,
+        username: resolvedUsername,
         display_name: displayName,
         updated_at: now,
       },
@@ -68,18 +97,28 @@ export async function POST(request: Request) {
   );
 
   const profile = await profiles.findOne({ user_id: authState.userId });
-  return NextResponse.json({ profile: profile ? serializeDoc(profile) : null });
+  return NextResponse.json({
+    profile: profile ? serializeDoc(profile) : null,
+    usernameAdjusted: resolvedUsername !== username,
+  });
 }
 
 export async function PATCH(request: Request) {
   const authState = await requireUserId();
   if (authState.error) return authState.error;
 
-  const body = await request.json();
+  const parsed = await readJsonBody<{ displayName?: unknown; bio?: unknown }>(request);
+  if (parsed.error) return parsed.error;
+
+  const body = parsed.body || {};
   const updates: Record<string, unknown> = { updated_at: new Date() };
 
   if (typeof body.displayName === "string") {
-    updates.display_name = body.displayName.trim();
+    const trimmedDisplayName = body.displayName.trim();
+    if (!trimmedDisplayName) {
+      return badRequest("Display name cannot be empty");
+    }
+    updates.display_name = trimmedDisplayName;
   }
 
   if (typeof body.bio === "string") {
