@@ -7,7 +7,18 @@ interface AuthContextType {
   session: null;
   profile: Profile | null;
   loading: boolean;
-  signUp: (email: string, password: string, username: string, displayName: string) => Promise<{ error: Error | null }>;
+  signUp: (
+    email: string,
+    password: string,
+    username: string,
+    displayName: string
+  ) => Promise<{ error: Error | null; requiresVerification: boolean }>;
+  completeSignUpVerification: (
+    code: string,
+    username: string,
+    displayName: string
+  ) => Promise<{ error: Error | null }>;
+  resendSignUpVerification: () => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -234,7 +245,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signUp = async (email: string, password: string, username: string, displayName: string) => {
     try {
       if (!clerkSignUp) {
-        return { error: new Error('Authentication is not ready yet.') };
+        return { error: new Error('Authentication is not ready yet.'), requiresVerification: false };
       }
 
       const normalizedEmail = email.trim().toLowerCase();
@@ -267,19 +278,105 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const result = await clerkSignUp.password(signUpParams);
 
       if (result.error) {
-        return { error: new Error(getAuthErrorMessage(result.error, 'Sign up failed', 'signUp')) };
+        return {
+          error: new Error(getAuthErrorMessage(result.error, 'Sign up failed', 'signUp')),
+          requiresVerification: false,
+        };
       }
 
       if (clerkSignUp.status !== 'complete') {
-        return { error: new Error('Sign up requires additional verification in Clerk settings.') };
+        try {
+          const sendCodeResult = await clerkSignUp.verifications.sendEmailCode();
+          if (sendCodeResult.error) {
+            return {
+              error: new Error(
+                getAuthErrorMessage(
+                  sendCodeResult.error,
+                  'Sign up started, but verification could not be prepared. Please try again.',
+                  'signUp'
+                )
+              ),
+              requiresVerification: false,
+            };
+          }
+
+          return { error: null, requiresVerification: true };
+        } catch (error: unknown) {
+          return {
+            error: new Error(
+              getAuthErrorMessage(
+                error,
+                'Sign up started, but verification could not be prepared. Please try again.',
+                'signUp'
+              )
+            ),
+            requiresVerification: false,
+          };
+        }
       }
 
       const finalizeResult = await clerkSignUp.finalize();
       if (finalizeResult.error) {
-        return { error: new Error(getAuthErrorMessage(finalizeResult.error, 'Sign up finalization failed', 'signUp')) };
+        return {
+          error: new Error(getAuthErrorMessage(finalizeResult.error, 'Sign up finalization failed', 'signUp')),
+          requiresVerification: false,
+        };
       }
 
       const ensuredProfile = await ensureProfile(normalizedUsername, normalizedDisplayName);
+      if (ensuredProfile.error) {
+        return { error: ensuredProfile.error, requiresVerification: false };
+      }
+
+      await fetchProfile().catch(() => undefined);
+      return { error: null, requiresVerification: false };
+    } catch (error: unknown) {
+      return {
+        error: new Error(getAuthErrorMessage(error, 'Sign up failed', 'signUp')),
+        requiresVerification: false,
+      };
+    }
+  };
+
+  const completeSignUpVerification = async (code: string, username: string, displayName: string) => {
+    try {
+      if (!clerkSignUp) {
+        return { error: new Error('Authentication is not ready yet.') };
+      }
+
+      const normalizedCode = code.trim();
+      if (!normalizedCode) {
+        return { error: new Error('Verification code is required.') };
+      }
+
+      const verificationResult = await clerkSignUp.verifications.verifyEmailCode({
+        code: normalizedCode,
+      });
+
+      if (verificationResult.error) {
+        return {
+          error: new Error(
+            getAuthErrorMessage(verificationResult.error, 'Invalid or expired verification code.', 'signUp')
+          ),
+        };
+      }
+
+      if (clerkSignUp.status !== 'complete') {
+        return {
+          error: new Error(
+            'Verification is not complete yet. Check your code and try again.'
+          ),
+        };
+      }
+
+      const finalizeResult = await clerkSignUp.finalize();
+      if (finalizeResult.error) {
+        return {
+          error: new Error(getAuthErrorMessage(finalizeResult.error, 'Could not finalize sign up.', 'signUp')),
+        };
+      }
+
+      const ensuredProfile = await ensureProfile(username, displayName);
       if (ensuredProfile.error) {
         return ensuredProfile;
       }
@@ -287,7 +384,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await fetchProfile().catch(() => undefined);
       return { error: null };
     } catch (error: unknown) {
-      return { error: new Error(getAuthErrorMessage(error, 'Sign up failed', 'signUp')) };
+      return {
+        error: new Error(getAuthErrorMessage(error, 'Could not verify your sign up code.', 'signUp')),
+      };
+    }
+  };
+
+  const resendSignUpVerification = async () => {
+    try {
+      if (!clerkSignUp) {
+        return { error: new Error('Authentication is not ready yet.') };
+      }
+
+      const resendResult = await clerkSignUp.verifications.sendEmailCode();
+      if (resendResult.error) {
+        return {
+          error: new Error(getAuthErrorMessage(resendResult.error, 'Could not resend verification code.', 'signUp')),
+        };
+      }
+
+      return { error: null };
+    } catch (error: unknown) {
+      return {
+        error: new Error(getAuthErrorMessage(error, 'Could not resend verification code.', 'signUp')),
+      };
     }
   };
 
@@ -328,7 +448,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, loading, signUp, signIn, signOut, refreshProfile }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        profile,
+        loading,
+        signUp,
+        completeSignUpVerification,
+        resendSignUpVerification,
+        signIn,
+        signOut,
+        refreshProfile,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
