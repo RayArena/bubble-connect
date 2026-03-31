@@ -5,6 +5,8 @@ import { getDb } from "@/lib/mongodb";
 import { badRequest, internalServerError, readJsonBody, requireUserId, serializeDoc, toIsoDate } from "@/lib/api-helpers";
 import { permanentlyDeleteUserData } from "@/lib/user-lifecycle";
 
+export const runtime = "nodejs";
+
 const USERNAME_MIN_LENGTH = 3;
 const USERNAME_MAX_LENGTH = 30;
 

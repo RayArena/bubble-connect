@@ -1,6 +1,7 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth, verifyToken } from "@clerk/nextjs/server";
 import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 
 export function toIsoDate(value: Date | string | undefined) {
   if (!value) return new Date().toISOString();
@@ -30,7 +31,44 @@ export async function requireUserId() {
 
     return { userId, error: null };
   } catch (error) {
+    // Fallback: if auth() fails due middleware context/runtime issues, verify session cookie directly.
+    try {
+      const cookieStore = await cookies();
+      const sessionToken = cookieStore.get("__session")?.value;
+      const secretKey = process.env.CLERK_SECRET_KEY;
+
+      if (sessionToken && secretKey) {
+        const verified = await verifyToken(sessionToken, {
+          secretKey,
+        });
+
+        const fallbackUserId = typeof verified.sub === "string" ? verified.sub : null;
+        if (fallbackUserId) {
+          return { userId: fallbackUserId, error: null };
+        }
+      }
+    } catch (fallbackError) {
+      console.error("Auth fallback token verification failed", fallbackError);
+    }
+
     console.error("Auth check failed", error);
+
+    const message = error instanceof Error ? error.message : "Unknown auth error";
+    const lower = message.toLowerCase();
+
+    if (lower.includes("middleware") || lower.includes("request") || lower.includes("auth()")) {
+      return {
+        userId: null,
+        error: NextResponse.json(
+          {
+            error: "Authentication context is unavailable for this request. Ensure middleware is running for API routes.",
+            code: "AUTH_CONTEXT_ERROR",
+          },
+          { status: 503 }
+        ),
+      };
+    }
+
     return {
       userId: null,
       error: NextResponse.json(

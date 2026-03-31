@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { internalServerError, readJsonBody, requireUserId, serializeDoc } from "@/lib/api-helpers";
 import { getDb } from "@/lib/mongodb";
 
+export const runtime = "nodejs";
+
 export async function GET() {
   try {
     const authState = await requireUserId();
