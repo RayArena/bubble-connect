@@ -4,6 +4,15 @@ import { Send, Phone, Video, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import type { Message, Profile } from '@/types/db';
 import { useToast } from '@/hooks/use-toast';
+import { useRealtimeSocket } from '@/hooks/use-realtime-socket';
+
+type RealtimeEvent = {
+  type?: string;
+  data?: {
+    conversationId?: string;
+    message?: Message & { sender?: Profile | null };
+  };
+};
 
 interface ChatAreaProps {
   conversationId: string;
@@ -18,6 +27,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
   const [convType, setConvType] = useState('dm');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const latestServerMessageAtRef = useRef<string | null>(null);
+  const { socket, connected } = useRealtimeSocket();
 
   useEffect(() => {
     let mounted = true;
@@ -32,17 +42,54 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
 
     void hydrate();
 
-    const interval = setInterval(() => {
-      if (mounted) {
-        void loadMessages(true);
-      }
-    }, 1200);
-
     return () => {
       mounted = false;
-      clearInterval(interval);
     };
   }, [conversationId]);
+
+  useEffect(() => {
+    if (connected) return;
+
+    const interval = setInterval(() => {
+      void loadMessages(true);
+    }, 1800);
+
+    return () => clearInterval(interval);
+  }, [connected, conversationId]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleRealtimeEvent = (event: RealtimeEvent) => {
+      if (event.type !== 'message.created') return;
+
+      const nextMessage = event.data?.message;
+      const nextConversationId = event.data?.conversationId;
+
+      if (!nextMessage?.id || nextConversationId !== conversationId) {
+        return;
+      }
+
+      if (nextMessage.created_at) {
+        latestServerMessageAtRef.current = nextMessage.created_at;
+      }
+
+      setMessages((prev) => {
+        if (prev.some((message) => message.id === nextMessage.id)) {
+          return prev;
+        }
+        return [...prev, nextMessage];
+      });
+    };
+
+    socket.emit('conversation:subscribe', conversationId);
+    socket.on('realtime:event', handleRealtimeEvent);
+
+    return () => {
+      socket.emit('conversation:unsubscribe', conversationId);
+      socket.off('realtime:event', handleRealtimeEvent);
+    };
+  }, [socket, conversationId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

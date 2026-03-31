@@ -4,6 +4,11 @@ import { MessageCircle, Users, UserPlus, Settings, Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { Conversation, Profile } from '@/types/db';
 import CreateGroupDialog from './CreateGroupDialog';
+import { useRealtimeSocket } from '@/hooks/use-realtime-socket';
+
+type RealtimeEvent = {
+  type?: string;
+};
 
 interface ChatSidebarProps {
   activeConversationId: string | null;
@@ -23,12 +28,33 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   const [conversations, setConversations] = useState<(Conversation & { otherUser?: Profile | null })[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const { socket } = useRealtimeSocket();
 
   useEffect(() => {
     if (!user) return;
     void loadConversations();
     void loadPendingCount();
   }, [user]);
+
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    const handleRealtimeEvent = (event: RealtimeEvent) => {
+      const eventType = event.type || '';
+      if (eventType === 'conversations.changed' || eventType === 'message.created') {
+        void loadConversations();
+      }
+      if (eventType === 'friendships.changed') {
+        void loadPendingCount();
+      }
+    };
+
+    socket.on('realtime:event', handleRealtimeEvent);
+
+    return () => {
+      socket.off('realtime:event', handleRealtimeEvent);
+    };
+  }, [socket, user]);
 
   const loadConversations = async () => {
     if (!user) return;

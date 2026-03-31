@@ -2,6 +2,7 @@ import { ObjectId } from "mongodb";
 import { NextRequest, NextResponse } from "next/server";
 import { badRequest, internalServerError, readJsonBody, requireUserId, serializeDoc } from "@/lib/api-helpers";
 import { getDb } from "@/lib/mongodb";
+import { publishRealtimeEvent, roomForUser } from "@/lib/realtime";
 
 export const runtime = "nodejs";
 
@@ -230,6 +231,16 @@ export async function POST(request: Request) {
   });
 
   const friendship = await friendships.findOne({ _id: created.insertedId });
+
+  void publishRealtimeEvent(
+    [roomForUser(authState.userId), roomForUser(addresseeId)],
+    "friendships.changed",
+    {
+      requesterId: authState.userId,
+      addresseeId,
+    }
+  );
+
   return NextResponse.json({ friendship: friendship ? serializeDoc(friendship) : null });
 }
 
@@ -268,6 +279,16 @@ export async function PATCH(request: Request) {
   } else {
     await friendships.deleteOne({ _id: friendshipObjectId });
   }
+
+  void publishRealtimeEvent(
+    [roomForUser(target.requester_id), roomForUser(target.addressee_id)],
+    "friendships.changed",
+    {
+      requesterId: target.requester_id,
+      addresseeId: target.addressee_id,
+      accepted: accept,
+    }
+  );
 
   return NextResponse.json({ ok: true });
 }

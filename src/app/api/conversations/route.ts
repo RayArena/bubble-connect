@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { internalServerError, readJsonBody, requireUserId, serializeDoc } from "@/lib/api-helpers";
 import { getDb } from "@/lib/mongodb";
+import { publishRealtimeEvent, roomForUser } from "@/lib/realtime";
 
 export const runtime = "nodejs";
 
@@ -206,6 +207,16 @@ export async function POST(request: Request) {
     ]);
 
     const conversation = await db.collection("conversations").findOne({ id: conversationId });
+
+    void publishRealtimeEvent(
+      [roomForUser(authState.userId), roomForUser(friendUserId)],
+      "conversations.changed",
+      {
+        conversationId,
+        type: "dm",
+      }
+    );
+
     return NextResponse.json({ conversation: conversation ? serializeDoc(conversation) : null, existed: false });
   }
 
@@ -240,6 +251,16 @@ export async function POST(request: Request) {
     );
 
     const conversation = await db.collection("conversations").findOne({ id: conversationId });
+
+    void publishRealtimeEvent(
+      allMembers.map((memberId) => roomForUser(memberId)),
+      "conversations.changed",
+      {
+        conversationId,
+        type: "group",
+      }
+    );
+
     return NextResponse.json({ conversation: conversation ? serializeDoc(conversation) : null, existed: false });
   }
 

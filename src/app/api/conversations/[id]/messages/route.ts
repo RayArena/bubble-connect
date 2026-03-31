@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { readJsonBody, requireUserId, serializeDoc } from "@/lib/api-helpers";
 import { getDb } from "@/lib/mongodb";
+import { publishRealtimeEvent, roomForConversation, roomForUser } from "@/lib/realtime";
 
 interface Context {
   params: Promise<{ id: string }>;
@@ -127,5 +128,62 @@ export async function POST(request: Request, context: Context) {
     .collection("conversations")
     .updateOne({ id: conversationId }, { $set: { updated_at: now } });
 
-  return NextResponse.json({ message: serializeDoc(newMessage) });
+  const sender = await db.collection("profiles").findOne(
+    { user_id: authState.userId, is_deleted: { $ne: true } },
+    {
+      projection: {
+        _id: 1,
+        id: 1,
+        user_id: 1,
+        username: 1,
+        display_name: 1,
+        avatar_url: 1,
+        bio: 1,
+        status: 1,
+        created_at: 1,
+        updated_at: 1,
+      },
+    }
+  );
+
+  const serializedMessage = {
+    ...serializeDoc(newMessage),
+    sender: sender ? serializeDoc(sender) : null,
+  };
+
+  const members = await db
+    .collection("conversation_members")
+    .find(
+      { conversation_id: conversationId },
+      {
+        projection: {
+          _id: 0,
+          user_id: 1,
+        },
+      }
+    )
+    .toArray();
+
+  const memberUserIds = Array.from(new Set(members.map((member) => member.user_id).filter(Boolean)));
+
+  void publishRealtimeEvent(
+    [roomForConversation(conversationId)],
+    "message.created",
+    {
+      conversationId,
+      message: serializedMessage,
+    }
+  );
+
+  if (memberUserIds.length) {
+    void publishRealtimeEvent(
+      memberUserIds.map((userId) => roomForUser(userId)),
+      "conversations.changed",
+      {
+        conversationId,
+      }
+    );
+  }
+
+  return NextResponse.json({ message: serializedMessage });
 }

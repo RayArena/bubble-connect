@@ -5,6 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Search, UserPlus, Check, X, MessageCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import type { Friendship, Profile } from '@/types/db';
+import { useRealtimeSocket } from '@/hooks/use-realtime-socket';
+
+type RealtimeEvent = {
+  type?: string;
+};
 
 interface FriendRequestPanelProps {
   onClose: () => void;
@@ -20,12 +25,29 @@ const FriendRequestPanel: React.FC<FriendRequestPanelProps> = ({ onClose, onOpen
   const [friends, setFriends] = useState<(Friendship & { friend?: Profile })[]>([]);
   const [searching, setSearching] = useState(false);
   const [tab, setTab] = useState<'add' | 'pending' | 'friends'>('add');
+  const { socket } = useRealtimeSocket();
 
   useEffect(() => {
     if (!user) return;
 
     void loadFriendshipSummary();
   }, [user]);
+
+  useEffect(() => {
+    if (!socket || !user) return;
+
+    const handleRealtimeEvent = (event: RealtimeEvent) => {
+      if (event.type === 'friendships.changed') {
+        void loadFriendshipSummary();
+      }
+    };
+
+    socket.on('realtime:event', handleRealtimeEvent);
+
+    return () => {
+      socket.off('realtime:event', handleRealtimeEvent);
+    };
+  }, [socket, user]);
 
   const loadFriendshipSummary = async () => {
     if (!user) return;

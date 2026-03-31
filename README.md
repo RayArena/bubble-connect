@@ -4,6 +4,7 @@ Bubble Connect now uses:
 
 - Clerk for authentication
 - MongoDB for app data (profiles, friendships, conversations, messages)
+- Upstash Redis + WebSockets for realtime fanout (messages, conversation updates, friend requests)
 
 ## Environment Variables
 
@@ -13,8 +14,11 @@ Add these to `.env`:
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""
 CLERK_SECRET_KEY=""
 MONGODB_URI=""
+UPSTASH_REDIS_URL=""
 CLERK_WEBHOOK_SIGNING_SECRET=""
 ```
+
+`UPSTASH_REDIS_URL` should be the Redis protocol URL (starts with `redis://` or `rediss://`).
 
 ## Clerk Webhook Setup
 
@@ -33,9 +37,19 @@ npm install
 npm run dev
 ```
 
+## Realtime Setup
+
+- The websocket bootstrap route is `/api/socket`.
+- Clients authenticate socket connections with Clerk session token/cookie.
+- API writes persist to MongoDB first, then publish realtime events to Redis channel `realtime:events`.
+- Connected users receive:
+	- `message.created` in subscribed conversation rooms
+	- `conversations.changed` in user rooms
+	- `friendships.changed` in user rooms
+
 ## Notes
 
 - Sign-in/sign-up UI is preserved from the original auth page.
-- Chat message updates now use polling (every 2 seconds) instead of Supabase realtime channels.
+- MongoDB remains the system of record. Redis is only used for realtime event delivery.
 - Users can permanently delete their full account (Clerk auth + app data) from the profile page after a double confirmation.
 - Clerk `user.deleted` webhook now removes profile, friendships, memberships, and linked conversation/message data.
