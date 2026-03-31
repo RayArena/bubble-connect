@@ -218,26 +218,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const fetchProfile = async () => {
     if (!clerkUser?.id) {
       setProfile(null);
-      return;
+      return null;
     }
 
-    try {
-      const res = await fetch('/api/profile', { cache: 'no-store' });
-      if (!res.ok) {
-        setProfile(null);
-        return;
+    const retryDelays = [0, 300, 700, 1200, 2000];
+
+    for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+      if (retryDelays[attempt] > 0) {
+        await wait(retryDelays[attempt]);
       }
 
-      const payload = await parseJsonSafely(res);
-      const nextProfile =
-        payload && typeof payload === 'object' && 'profile' in payload
-          ? ((payload as { profile?: Profile | null }).profile ?? null)
-          : null;
+      try {
+        const res = await fetch('/api/profile', { cache: 'no-store' });
+        if (!res.ok) {
+          const shouldRetryAuth = (res.status === 401 || res.status === 403) && attempt < retryDelays.length - 1;
+          if (shouldRetryAuth) {
+            continue;
+          }
 
-      setProfile(nextProfile);
-    } catch {
-      setProfile(null);
+          if (attempt < retryDelays.length - 1) {
+            continue;
+          }
+
+          setProfile(null);
+          return null;
+        }
+
+        const payload = await parseJsonSafely(res);
+        const nextProfile =
+          payload && typeof payload === 'object' && 'profile' in payload
+            ? ((payload as { profile?: Profile | null }).profile ?? null)
+            : null;
+
+        if (!nextProfile && attempt < retryDelays.length - 1) {
+          continue;
+        }
+
+        setProfile(nextProfile);
+        return nextProfile;
+      } catch {
+        if (attempt < retryDelays.length - 1) {
+          continue;
+        }
+
+        setProfile(null);
+        return null;
+      }
     }
+
+    setProfile(null);
+    return null;
   };
 
   const refreshProfile = async () => {
@@ -341,7 +371,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const ensuredProfile = await ensureProfile(normalizedUsername, normalizedDisplayName);
       if (ensuredProfile.error) {
-        return { error: ensuredProfile.error, requiresVerification: false };
+        const recoveredProfile = await fetchProfile().catch(() => null);
+        if (!recoveredProfile) {
+          return { error: ensuredProfile.error, requiresVerification: false };
+        }
       }
 
       await fetchProfile().catch(() => undefined);
@@ -394,7 +427,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const ensuredProfile = await ensureProfile(username, displayName);
       if (ensuredProfile.error) {
-        return ensuredProfile;
+        const recoveredProfile = await fetchProfile().catch(() => null);
+        if (!recoveredProfile) {
+          return ensuredProfile;
+        }
       }
 
       await fetchProfile().catch(() => undefined);

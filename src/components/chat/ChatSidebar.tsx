@@ -18,20 +18,20 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   onToggleFriendRequests,
   showFriendRequests,
 }) => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const router = useRouter();
   const [conversations, setConversations] = useState<(Conversation & { otherUser?: Profile | null })[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
 
   useEffect(() => {
-    if (!profile) return;
-    loadConversations();
-    loadPendingCount();
-  }, [profile]);
+    if (!user) return;
+    void loadConversations();
+    void loadPendingCount();
+  }, [user]);
 
   const loadConversations = async () => {
-    if (!profile) return;
+    if (!user) return;
     const response = await fetch('/api/conversations', { cache: 'no-store' });
     if (!response.ok) return;
     const payload = await response.json();
@@ -39,7 +39,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   };
 
   const loadPendingCount = async () => {
-    if (!profile) return;
+    if (!user) return;
     const response = await fetch('/api/friendships?type=pendingCount', { cache: 'no-store' });
     if (!response.ok) return;
     const payload = await response.json();
