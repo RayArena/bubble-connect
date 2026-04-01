@@ -10,6 +10,16 @@ let sharedSocket: SharedSocket = null;
 let socketInitPromise: Promise<SharedSocket> | null = null;
 let sharedSocketUserId: string | null = null;
 
+function shouldForcePollingTransport() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const forcedByEnv = process.env.NEXT_PUBLIC_SOCKET_TRANSPORT === "polling";
+  const hostedOnVercel = window.location.hostname.endsWith("vercel.app");
+  return forcedByEnv || hostedOnVercel;
+}
+
 async function getOrCreateSocket(token?: string | null, userId?: string | null) {
   if (typeof window === "undefined") {
     return null;
@@ -32,9 +42,12 @@ async function getOrCreateSocket(token?: string | null, userId?: string | null) 
     socketInitPromise = (async () => {
       await fetch("/api/socket", { cache: "no-store" }).catch(() => null);
 
+      const forcePolling = shouldForcePollingTransport();
+
       const socket = io({
         path: "/api/socket",
-        transports: ["websocket", "polling"],
+        transports: forcePolling ? ["polling"] : ["websocket", "polling"],
+        upgrade: !forcePolling,
         withCredentials: true,
         auth: token ? { token } : undefined,
       });
