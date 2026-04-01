@@ -7,6 +7,13 @@ interface Context {
   params: Promise<{ id: string }>;
 }
 
+function isValidClientMessageId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+  );
+}
+
 export async function GET(_request: Request, context: Context) {
   const authState = await requireUserId();
   if (authState.error) return authState.error;
@@ -83,10 +90,13 @@ export async function POST(request: Request, context: Context) {
   if (authState.error) return authState.error;
 
   const { id: conversationId } = await context.params;
-  const parsed = await readJsonBody<{ content?: unknown }>(request);
+  const parsed = await readJsonBody<{ content?: unknown; clientMessageId?: unknown }>(request);
   if (parsed.error) return parsed.error;
 
   const content = typeof parsed.body?.content === "string" ? parsed.body.content.trim() : "";
+  const clientMessageId = isValidClientMessageId(parsed.body?.clientMessageId)
+    ? parsed.body.clientMessageId
+    : null;
 
   if (!content) {
     return NextResponse.json({ error: "Message content is required" }, { status: 400 });
@@ -105,7 +115,7 @@ export async function POST(request: Request, context: Context) {
 
   const now = new Date();
   const newMessage = {
-    id: crypto.randomUUID(),
+    id: clientMessageId || crypto.randomUUID(),
     conversation_id: conversationId,
     sender_id: authState.userId,
     content,

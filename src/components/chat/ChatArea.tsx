@@ -124,7 +124,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
     if (!newMessage.trim() || !user) return;
 
     const content = newMessage.trim();
-    const optimisticId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const clientMessageId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticId = clientMessageId;
     const optimisticMessage: ChatMessage = {
       id: optimisticId,
       conversation_id: conversationId,
@@ -145,6 +149,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           content,
+          clientMessageId,
         }),
       });
 

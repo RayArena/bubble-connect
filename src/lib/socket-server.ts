@@ -106,7 +106,7 @@ export function initializeSocketServer(server: HttpServer) {
 
   const io = new SocketIOServer(server, {
     path: "/api/socket",
-    transports: ["websocket"],
+    transports: ["websocket", "polling"],
     cors: {
       origin: true,
       credentials: true,

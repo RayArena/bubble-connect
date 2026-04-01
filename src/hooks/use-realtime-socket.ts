@@ -34,7 +34,7 @@ async function getOrCreateSocket(token?: string | null, userId?: string | null) 
 
       const socket = io({
         path: "/api/socket",
-        transports: ["websocket"],
+        transports: ["websocket", "polling"],
         withCredentials: true,
         auth: token ? { token } : undefined,
       });
