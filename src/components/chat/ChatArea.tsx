@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Send, Phone, Video, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -6,11 +6,13 @@ import type { Message, Profile } from '@/types/db';
 import { useToast } from '@/hooks/use-toast';
 import { useRealtimeSocket } from '@/hooks/use-realtime-socket';
 
+type ChatMessage = Message & { sender?: Profile | null };
+
 type RealtimeEvent = {
   type?: string;
   data?: {
     conversationId?: string;
-    message?: Message & { sender?: Profile | null };
+    message?: ChatMessage;
   };
 };
 
@@ -18,84 +20,23 @@ interface ChatAreaProps {
   conversationId: string;
 }
 
+function sortByCreatedAt(messages: ChatMessage[]) {
+  return [...messages].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
+}
+
 const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
   const { user, profile } = useAuth();
   const { toast } = useToast();
-  const [messages, setMessages] = useState<(Message & { sender?: Profile })[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [convName, setConvName] = useState('');
   const [convType, setConvType] = useState('dm');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const latestServerMessageAtRef = useRef<string | null>(null);
-  const { socket, connected } = useRealtimeSocket();
+  const { socket } = useRealtimeSocket();
 
-  useEffect(() => {
-    let mounted = true;
-    setMessages([]);
-    setConvName('');
-    setConvType('dm');
-    latestServerMessageAtRef.current = null;
-
-    const hydrate = async () => {
-      await Promise.all([loadConversation(), loadMessages(false)]);
-    };
-
-    void hydrate();
-
-    return () => {
-      mounted = false;
-    };
-  }, [conversationId]);
-
-  useEffect(() => {
-    if (connected) return;
-
-    const interval = setInterval(() => {
-      void loadMessages(true);
-    }, 1800);
-
-    return () => clearInterval(interval);
-  }, [connected, conversationId]);
-
-  useEffect(() => {
-    if (!socket) return;
-
-    const handleRealtimeEvent = (event: RealtimeEvent) => {
-      if (event.type !== 'message.created') return;
-
-      const nextMessage = event.data?.message;
-      const nextConversationId = event.data?.conversationId;
-
-      if (!nextMessage?.id || nextConversationId !== conversationId) {
-        return;
-      }
-
-      if (nextMessage.created_at) {
-        latestServerMessageAtRef.current = nextMessage.created_at;
-      }
-
-      setMessages((prev) => {
-        if (prev.some((message) => message.id === nextMessage.id)) {
-          return prev;
-        }
-        return [...prev, nextMessage];
-      });
-    };
-
-    socket.emit('conversation:subscribe', conversationId);
-    socket.on('realtime:event', handleRealtimeEvent);
-
-    return () => {
-      socket.emit('conversation:unsubscribe', conversationId);
-      socket.off('realtime:event', handleRealtimeEvent);
-    };
-  }, [socket, conversationId]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const loadConversation = async () => {
+  const loadConversation = useCallback(async () => {
     const response = await fetch(`/api/conversations/${conversationId}`, { cache: 'no-store' });
     if (!response.ok) return;
 
@@ -110,49 +51,73 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
     }
 
     setConvName(payload.otherUser?.display_name || 'Unknown');
-  };
+  }, [conversationId]);
 
-  const loadMessages = async (incremental: boolean) => {
-    const params = new URLSearchParams();
-    if (incremental && latestServerMessageAtRef.current) {
-      params.set('since', latestServerMessageAtRef.current);
-    }
-
-    const queryString = params.toString();
-    const url = `/api/conversations/${conversationId}/messages${queryString ? `?${queryString}` : ''}`;
-    const response = await fetch(url, { cache: 'no-store' });
+  const loadMessages = useCallback(async () => {
+    const response = await fetch(`/api/conversations/${conversationId}/messages`, { cache: 'no-store' });
     if (!response.ok) return;
 
     const payload = await response.json();
-    const incomingMessages = (payload.messages || []) as (Message & { sender?: Profile })[];
+    const incomingMessages = (payload.messages || []) as ChatMessage[];
+    setMessages(sortByCreatedAt(incomingMessages));
+  }, [conversationId]);
 
-    if (!incomingMessages.length) {
-      return;
-    }
+  useEffect(() => {
+    setMessages([]);
+    setConvName('');
+    setConvType('dm');
 
-    const latestMessage = incomingMessages[incomingMessages.length - 1];
-    if (latestMessage?.created_at) {
-      latestServerMessageAtRef.current = latestMessage.created_at;
-    }
+    void Promise.all([loadConversation(), loadMessages()]);
+  }, [loadConversation, loadMessages]);
 
-    if (!incremental) {
-      setMessages(incomingMessages);
-      return;
-    }
+  useEffect(() => {
+    if (!socket) return;
 
-    setMessages((prev) => {
-      const seen = new Set(prev.map((message) => message.id));
-      const merged = [...prev];
-
-      incomingMessages.forEach((message) => {
-        if (!seen.has(message.id)) {
-          merged.push(message);
+    const subscribeToConversation = () => {
+      socket.emit('conversation:subscribe', conversationId, (result?: { ok: boolean }) => {
+        if (result?.ok) {
+          void loadMessages();
         }
       });
+    };
 
-      return merged;
-    });
-  };
+    const handleRealtimeEvent = (event: RealtimeEvent) => {
+      if (event.type !== 'message.created') return;
+
+      const nextMessage = event.data?.message;
+      const nextConversationId = event.data?.conversationId;
+
+      if (!nextMessage?.id || nextConversationId !== conversationId) {
+        return;
+      }
+
+      setMessages((prev) => {
+        const withoutDuplicate = prev.filter((message) => message.id !== nextMessage.id);
+        return sortByCreatedAt([...withoutDuplicate, nextMessage]);
+      });
+    };
+
+    const handleConnect = () => {
+      subscribeToConversation();
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('realtime:event', handleRealtimeEvent);
+
+    if (socket.connected) {
+      handleConnect();
+    }
+
+    return () => {
+      socket.emit('conversation:unsubscribe', conversationId);
+      socket.off('connect', handleConnect);
+      socket.off('realtime:event', handleRealtimeEvent);
+    };
+  }, [socket, conversationId, loadMessages]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -160,7 +125,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
 
     const content = newMessage.trim();
     const optimisticId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const optimisticMessage: Message & { sender?: Profile } = {
+    const optimisticMessage: ChatMessage = {
       id: optimisticId,
       conversation_id: conversationId,
       sender_id: user.id,
@@ -191,23 +156,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
       }
 
       const payload = await response.json().catch(() => null);
-      const serverMessage = payload?.message as (Message & { sender?: Profile }) | undefined;
+      const serverMessage = payload?.message as ChatMessage | undefined;
 
       if (!serverMessage?.id) {
-        void loadMessages(true);
+        setMessages((prev) => prev.filter((message) => message.id !== optimisticId));
+        void loadMessages();
         return;
       }
 
-      if (serverMessage.created_at) {
-        latestServerMessageAtRef.current = serverMessage.created_at;
-      }
-
       setMessages((prev) => {
-        const withoutOptimistic = prev.filter((message) => message.id !== optimisticId);
-        if (withoutOptimistic.some((message) => message.id === serverMessage.id)) {
-          return withoutOptimistic;
-        }
-        return [...withoutOptimistic, serverMessage];
+        const withoutOptimistic = prev.filter(
+          (message) => message.id !== optimisticId && message.id !== serverMessage.id
+        );
+        return sortByCreatedAt([...withoutOptimistic, serverMessage]);
       });
     } catch {
       setMessages((prev) => prev.filter((message) => message.id !== optimisticId));

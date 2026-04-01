@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -25,13 +25,25 @@ const FriendRequestPanel: React.FC<FriendRequestPanelProps> = ({ onClose, onOpen
   const [friends, setFriends] = useState<(Friendship & { friend?: Profile })[]>([]);
   const [searching, setSearching] = useState(false);
   const [tab, setTab] = useState<'add' | 'pending' | 'friends'>('add');
-  const { socket } = useRealtimeSocket();
+  const { socket, connected } = useRealtimeSocket();
+
+  const loadFriendshipSummary = useCallback(async () => {
+    if (!user) return;
+    const response = await fetch('/api/friendships?type=summary', { cache: 'no-store' });
+    if (!response.ok) return;
+    const payload = await response.json();
+    setPendingRequests(payload.pending || []);
+    setFriends(payload.friends || []);
+  }, [user]);
 
   useEffect(() => {
-    if (!user) return;
-
     void loadFriendshipSummary();
-  }, [user]);
+  }, [loadFriendshipSummary]);
+
+  useEffect(() => {
+    if (!connected) return;
+    void loadFriendshipSummary();
+  }, [connected, loadFriendshipSummary]);
 
   useEffect(() => {
     if (!socket || !user) return;
@@ -47,16 +59,7 @@ const FriendRequestPanel: React.FC<FriendRequestPanelProps> = ({ onClose, onOpen
     return () => {
       socket.off('realtime:event', handleRealtimeEvent);
     };
-  }, [socket, user]);
-
-  const loadFriendshipSummary = async () => {
-    if (!user) return;
-    const response = await fetch('/api/friendships?type=summary', { cache: 'no-store' });
-    if (!response.ok) return;
-    const payload = await response.json();
-    setPendingRequests(payload.pending || []);
-    setFriends(payload.friends || []);
-  };
+  }, [socket, user, loadFriendshipSummary]);
 
   const searchUsers = async () => {
     if (!searchQuery.trim() || !user) return;

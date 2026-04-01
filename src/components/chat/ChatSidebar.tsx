@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { MessageCircle, Users, UserPlus, Settings, Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -28,13 +28,34 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
   const [conversations, setConversations] = useState<(Conversation & { otherUser?: Profile | null })[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
-  const { socket } = useRealtimeSocket();
+  const { socket, connected } = useRealtimeSocket();
+
+  const loadConversations = useCallback(async () => {
+    if (!user) return;
+    const response = await fetch('/api/conversations', { cache: 'no-store' });
+    if (!response.ok) return;
+    const payload = await response.json();
+    setConversations(payload.conversations || []);
+  }, [user]);
+
+  const loadPendingCount = useCallback(async () => {
+    if (!user) return;
+    const response = await fetch('/api/friendships?type=pendingCount', { cache: 'no-store' });
+    if (!response.ok) return;
+    const payload = await response.json();
+    setPendingCount(payload.count || 0);
+  }, [user]);
 
   useEffect(() => {
-    if (!user) return;
     void loadConversations();
     void loadPendingCount();
-  }, [user]);
+  }, [loadConversations, loadPendingCount]);
+
+  useEffect(() => {
+    if (!connected) return;
+    void loadConversations();
+    void loadPendingCount();
+  }, [connected, loadConversations, loadPendingCount]);
 
   useEffect(() => {
     if (!socket || !user) return;
@@ -54,23 +75,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
     return () => {
       socket.off('realtime:event', handleRealtimeEvent);
     };
-  }, [socket, user]);
-
-  const loadConversations = async () => {
-    if (!user) return;
-    const response = await fetch('/api/conversations', { cache: 'no-store' });
-    if (!response.ok) return;
-    const payload = await response.json();
-    setConversations(payload.conversations || []);
-  };
-
-  const loadPendingCount = async () => {
-    if (!user) return;
-    const response = await fetch('/api/friendships?type=pendingCount', { cache: 'no-store' });
-    if (!response.ok) return;
-    const payload = await response.json();
-    setPendingCount(payload.count || 0);
-  };
+  }, [socket, user, loadConversations, loadPendingCount]);
 
   const getConversationName = (conv: Conversation & { otherUser?: Profile | null }) => {
     if (conv.type === 'group') return conv.name || 'Group';

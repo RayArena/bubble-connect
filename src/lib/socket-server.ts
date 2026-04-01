@@ -13,12 +13,6 @@ interface SocketServerState extends HttpServer {
   redisSubscriber?: ReturnType<typeof createClient>;
 }
 
-let globalIo: SocketIOServer | undefined;
-
-export function getGlobalIo() {
-  return globalIo;
-}
-
 interface SocketWithUser extends Socket {
   data: {
     userId?: string;
@@ -112,7 +106,7 @@ export function initializeSocketServer(server: HttpServer) {
 
   const io = new SocketIOServer(server, {
     path: "/api/socket",
-    transports: ["websocket", "polling"],
+    transports: ["websocket"],
     cors: {
       origin: true,
       credentials: true,
@@ -153,7 +147,6 @@ export function initializeSocketServer(server: HttpServer) {
   });
 
   socketServer.io = io;
-  globalIo = io;
   void initializeRedisSubscriber(io, socketServer);
   return io;
 }

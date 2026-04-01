@@ -7,7 +7,7 @@ interface Context {
   params: Promise<{ id: string }>;
 }
 
-export async function GET(request: Request, context: Context) {
+export async function GET(_request: Request, context: Context) {
   const authState = await requireUserId();
   if (authState.error) return authState.error;
 
@@ -23,18 +23,9 @@ export async function GET(request: Request, context: Context) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const sinceParam = new URL(request.url).searchParams.get("since");
-  const sinceDate = sinceParam ? new Date(sinceParam) : null;
-  const hasValidSince = Boolean(sinceDate && !Number.isNaN(sinceDate.getTime()));
-
-  const messageQuery: Record<string, unknown> = { conversation_id: conversationId };
-  if (hasValidSince && sinceDate) {
-    messageQuery.created_at = { $gte: sinceDate };
-  }
-
   const messages = await db
     .collection("messages")
-    .find(messageQuery, {
+    .find({ conversation_id: conversationId }, {
       projection: {
         _id: 1,
         id: 1,

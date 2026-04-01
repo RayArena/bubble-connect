@@ -8,13 +8,23 @@ type SharedSocket = Socket | null;
 
 let sharedSocket: SharedSocket = null;
 let socketInitPromise: Promise<SharedSocket> | null = null;
+let sharedSocketUserId: string | null = null;
 
-async function getOrCreateSocket(token?: string | null) {
+async function getOrCreateSocket(token?: string | null, userId?: string | null) {
   if (typeof window === "undefined") {
     return null;
   }
 
+  if (sharedSocket && sharedSocketUserId && userId && sharedSocketUserId !== userId) {
+    sharedSocket.disconnect();
+    sharedSocket = null;
+    sharedSocketUserId = null;
+  }
+
   if (sharedSocket) {
+    if (token) {
+      sharedSocket.auth = { token };
+    }
     return sharedSocket;
   }
 
@@ -24,12 +34,13 @@ async function getOrCreateSocket(token?: string | null) {
 
       const socket = io({
         path: "/api/socket",
-        transports: ["websocket", "polling"],
+        transports: ["websocket"],
         withCredentials: true,
         auth: token ? { token } : undefined,
       });
 
       sharedSocket = socket;
+      sharedSocketUserId = userId || null;
       return socket;
     })().finally(() => {
       socketInitPromise = null;
@@ -46,20 +57,29 @@ export function useRealtimeSocket() {
 
   useEffect(() => {
     if (!userId) {
+      if (sharedSocket) {
+        sharedSocket.disconnect();
+      }
+      sharedSocket = null;
+      sharedSocketUserId = null;
+      socketInitPromise = null;
       setSocket(null);
       setConnected(false);
       return;
     }
 
     let mounted = true;
-    let localSocket: SharedSocket = null;
+    let cleanupListeners: (() => void) | undefined;
 
     const setup = async () => {
       const token = await getToken().catch(() => null);
-      const nextSocket = await getOrCreateSocket(token);
+      const nextSocket = await getOrCreateSocket(token, userId);
       if (!mounted || !nextSocket) return;
 
-      localSocket = nextSocket;
+      if (token) {
+        nextSocket.auth = { token };
+      }
+
       setSocket(nextSocket);
       setConnected(nextSocket.connected);
 
@@ -69,24 +89,21 @@ export function useRealtimeSocket() {
       nextSocket.on("connect", onConnect);
       nextSocket.on("disconnect", onDisconnect);
 
-      return () => {
+      cleanupListeners = () => {
         nextSocket.off("connect", onConnect);
         nextSocket.off("disconnect", onDisconnect);
       };
+
+      if (!nextSocket.connected) {
+        nextSocket.connect();
+      }
     };
 
-    let teardown: (() => void) | undefined;
-    void setup().then((cleanup) => {
-      teardown = cleanup;
-    });
+    void setup();
 
     return () => {
       mounted = false;
-      teardown?.();
-
-      if (localSocket && !localSocket.connected) {
-        localSocket.connect();
-      }
+      cleanupListeners?.();
     };
   }, [getToken, userId]);
 
