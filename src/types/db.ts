@@ -32,12 +32,26 @@ export interface Conversation {
   updated_at: string;
 }
 
+export type MessageAttachmentCategory = "image" | "video" | "audio" | "document";
+
+export interface MessageAttachment {
+  id: string;
+  bucket: string;
+  path: string;
+  url: string;
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+  category: MessageAttachmentCategory;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
   sender_id: string;
   content: string;
   type: string;
+  attachments?: MessageAttachment[];
   created_at: string;
   updated_at: string;
 }

@@ -16,9 +16,17 @@ CLERK_SECRET_KEY=""
 MONGODB_URI=""
 UPSTASH_REDIS_URL=""
 CLERK_WEBHOOK_SIGNING_SECRET=""
+SUPABASE_URL=""
+SUPABASE_SERVICE_ROLE_KEY=""
+SUPABASE_STORAGE_BUCKET="chat-attachments"
+# Optional limits
+# CHAT_ATTACHMENT_MAX_FILES="10"
+# CHAT_ATTACHMENT_MAX_BYTES="104857600"
 ```
 
 `UPSTASH_REDIS_URL` should be the Redis protocol URL (starts with `redis://` or `rediss://`).
+
+For chat attachments, create a Supabase Storage bucket (default name: `chat-attachments`) and set it to public so media URLs can be opened directly in chat.
 
 ## Clerk Webhook Setup
 
