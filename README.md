@@ -26,7 +26,8 @@ SUPABASE_STORAGE_BUCKET="chat-attachments"
 
 `UPSTASH_REDIS_URL` should be the Redis protocol URL (starts with `redis://` or `rediss://`).
 
-For chat attachments, create a Supabase Storage bucket (default name: `chat-attachments`) and set it to public so media URLs can be opened directly in chat.
+For chat attachments, create a Supabase Storage bucket (default name: `chat-attachments`).
+The app serves media through an authenticated API route, so the bucket can be private.
 
 ## Clerk Webhook Setup
 

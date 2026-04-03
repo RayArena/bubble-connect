@@ -69,6 +69,27 @@ function getAttachmentKey(attachment: MessageAttachment, index: number) {
   return attachment.id || attachment.path || `${attachment.file_name}-${index}`;
 }
 
+function getAttachmentViewUrl(attachment: MessageAttachment) {
+  if (attachment.id) {
+    return `/api/attachments/${encodeURIComponent(attachment.id)}`;
+  }
+
+  if (attachment.url) {
+    return attachment.url;
+  }
+
+  return '#';
+}
+
+function getAttachmentDownloadUrl(attachment: MessageAttachment) {
+  const viewUrl = getAttachmentViewUrl(attachment);
+  if (viewUrl === '#') {
+    return '#';
+  }
+
+  return viewUrl.includes('?') ? `${viewUrl}&download=1` : `${viewUrl}?download=1`;
+}
+
 const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
   const { user, profile } = useAuth();
   const { toast } = useToast();
@@ -217,15 +238,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
 
   const renderAttachment = (attachment: MessageAttachment, isMine: boolean) => {
     const category = getAttachmentCategory(attachment);
+    const viewUrl = getAttachmentViewUrl(attachment);
+    const downloadUrl = getAttachmentDownloadUrl(attachment);
     const wrapperClass = isMine
       ? 'border-primary/20 bg-primary/5'
       : 'border-border bg-background/80';
 
     if (category === 'image') {
       return (
-        <a href={attachment.url} target="_blank" rel="noreferrer" className="block">
+        <a href={viewUrl} target="_blank" rel="noreferrer" className="block">
           <img
-            src={attachment.url}
+            src={viewUrl}
             alt={attachment.file_name || 'Image attachment'}
             loading="lazy"
             className={`max-h-80 w-full rounded-xl border object-cover ${wrapperClass}`}
@@ -239,7 +262,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
         <video
           controls
           preload="metadata"
-          src={attachment.url}
+          src={viewUrl}
           className={`max-h-80 w-full rounded-xl border ${wrapperClass}`}
         />
       );
@@ -248,28 +271,35 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
     if (category === 'audio') {
       return (
         <div className={`rounded-xl border p-2 ${wrapperClass}`}>
-          <audio controls preload="metadata" src={attachment.url} className="w-full" />
+          <audio controls preload="metadata" src={viewUrl} className="w-full" />
           <p className="mt-1 text-xs text-muted-foreground truncate">{attachment.file_name}</p>
         </div>
       );
     }
 
     return (
-      <a
-        href={attachment.url}
-        target="_blank"
-        rel="noreferrer"
+      <div
         className={`flex items-center gap-3 rounded-xl border px-3 py-2 transition-colors hover:bg-secondary/50 ${wrapperClass}`}
       >
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-muted-foreground">
-          <FileText className="h-4 w-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{attachment.file_name || 'Attachment'}</p>
-          <p className="text-xs text-muted-foreground">{formatFileSize(attachment.size_bytes)}</p>
-        </div>
-        <Download className="h-4 w-4 text-muted-foreground" />
-      </a>
+        <a href={viewUrl} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-muted-foreground">
+            <FileText className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{attachment.file_name || 'Attachment'}</p>
+            <p className="text-xs text-muted-foreground">{formatFileSize(attachment.size_bytes)}</p>
+          </div>
+        </a>
+        <a
+          href={downloadUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          title="Download"
+        >
+          <Download className="h-4 w-4" />
+        </a>
+      </div>
     );
   };
 

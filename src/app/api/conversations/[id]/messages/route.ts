@@ -49,6 +49,33 @@ const audioExtensions = new Set([
   "opus",
 ]);
 
+function buildAttachmentProxyUrl(attachmentId: string) {
+  return `/api/attachments/${encodeURIComponent(attachmentId)}`;
+}
+
+function withProxyAttachmentUrls(attachments: unknown) {
+  if (!Array.isArray(attachments)) {
+    return [];
+  }
+
+  return attachments.map((attachment) => {
+    if (!attachment || typeof attachment !== "object") {
+      return attachment;
+    }
+
+    const typedAttachment = attachment as MessageAttachment;
+    const hasId = typeof typedAttachment.id === "string" && typedAttachment.id.trim().length > 0;
+    if (!hasId) {
+      return typedAttachment;
+    }
+
+    return {
+      ...typedAttachment,
+      url: buildAttachmentProxyUrl(typedAttachment.id),
+    };
+  });
+}
+
 function isValidClientMessageId(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -222,6 +249,7 @@ export async function GET(_request: Request, context: Context) {
   return NextResponse.json({
     messages: messages.map((message) => ({
       ...serializeDoc(message),
+      attachments: withProxyAttachmentUrls(message.attachments),
       sender: senderMap[message.sender_id] || null,
     })),
   });
@@ -280,11 +308,13 @@ export async function POST(request: Request, context: Context) {
 
       uploadedAttachmentPaths.push(uploadedAttachment.path);
 
+      const attachmentId = crypto.randomUUID();
+
       attachments.push({
-        id: crypto.randomUUID(),
+        id: attachmentId,
         bucket: uploadedAttachment.bucket,
         path: uploadedAttachment.path,
-        url: uploadedAttachment.url,
+        url: buildAttachmentProxyUrl(attachmentId),
         file_name: uploadedAttachment.fileName,
         mime_type: uploadedAttachment.mimeType,
         size_bytes: uploadedAttachment.sizeBytes,
@@ -329,6 +359,7 @@ export async function POST(request: Request, context: Context) {
 
     const serializedMessage = {
       ...serializeDoc(newMessage),
+      attachments: withProxyAttachmentUrls(newMessage.attachments),
       sender: sender ? serializeDoc(sender) : null,
     };
 

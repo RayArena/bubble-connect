@@ -102,6 +102,12 @@ export interface UploadedAttachment {
   sizeBytes: number;
 }
 
+export interface DownloadedAttachment {
+  data: Blob;
+  contentType: string | null;
+  sizeBytes: number | null;
+}
+
 export async function uploadChatAttachmentToSupabase(params: {
   conversationId: string;
   messageId: string;
@@ -162,4 +168,31 @@ export async function removeChatAttachmentsFromSupabase(paths: string[]) {
   if (result.error) {
     console.error("Supabase cleanup failed", result.error);
   }
+}
+
+export async function downloadChatAttachmentFromSupabase(params: {
+  bucket: string;
+  path: string;
+}): Promise<DownloadedAttachment> {
+  const { bucket, path } = params;
+  if (!bucket || !path) {
+    throw new Error("Attachment bucket and path are required");
+  }
+
+  const client = getSupabaseAdminClient();
+  const result = await client.storage.from(bucket).download(path);
+
+  if (result.error) {
+    throw new Error(`Supabase download failed: ${result.error.message}`);
+  }
+
+  if (!result.data) {
+    throw new Error("Supabase download returned no data");
+  }
+
+  return {
+    data: result.data,
+    contentType: result.data.type || null,
+    sizeBytes: typeof result.data.size === "number" ? result.data.size : null,
+  };
 }
