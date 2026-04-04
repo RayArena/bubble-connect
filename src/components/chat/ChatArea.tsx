@@ -699,7 +699,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
             src={viewUrl}
             alt={attachment.file_name || 'Image attachment'}
             loading="lazy"
-            className={`max-h-80 w-full rounded-xl border object-cover ${wrapperClass}`}
+            className={`max-h-80 w-full rounded-xl attachment-border object-cover ${wrapperClass}`}
           />
         </a>
       );
@@ -711,7 +711,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ conversationId }) => {
           controls
           preload="metadata"
           src={viewUrl}
-          className={`max-h-80 w-full rounded-xl border ${wrapperClass}`}
+          className={`max-h-80 w-full rounded-xl attachment-border ${wrapperClass}`}
         />
       );
     }
