@@ -19,7 +19,9 @@ interface AuthContextType {
     displayName: string
   ) => Promise<{ error: Error | null }>;
   resendSignUpVerification: () => Promise<{ error: Error | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signIn: (email: string, password: string) => Promise<{ error: Error | null; requiresVerification: boolean }>;
+  completeSignInVerification: (code: string) => Promise<{ error: Error | null }>;
+  resendSignInVerification: () => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -481,7 +483,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signIn = async (email: string, password: string) => {
     try {
       if (!clerkSignIn) {
-        return { error: new Error('Authentication is not ready yet.') };
+        return { error: new Error('Authentication is not ready yet.'), requiresVerification: false };
       }
 
       const result = await clerkSignIn.password({
@@ -490,22 +492,115 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       if (result.error) {
-        return { error: new Error(getAuthErrorMessage(result.error, 'Sign in failed', 'signIn')) };
+        return {
+          error: new Error(getAuthErrorMessage(result.error, 'Sign in failed', 'signIn')),
+          requiresVerification: false,
+        };
+      }
+
+      if (clerkSignIn.status === 'needs_second_factor') {
+        const sendCodeResult = await clerkSignIn.mfa.sendEmailCode();
+        if (sendCodeResult.error) {
+          return {
+            error: new Error(
+              getAuthErrorMessage(
+                sendCodeResult.error,
+                'Sign in requires verification, but we could not send a code. Please try again.',
+                'signIn'
+              )
+            ),
+            requiresVerification: false,
+          };
+        }
+
+        return { error: null, requiresVerification: true };
       }
 
       if (clerkSignIn.status !== 'complete') {
-        return { error: new Error('Sign in requires additional verification in Clerk settings.') };
+        return {
+          error: new Error('Sign in requires additional verification in Clerk settings.'),
+          requiresVerification: false,
+        };
       }
 
       const finalizeResult = await clerkSignIn.finalize();
       if (finalizeResult.error) {
-        return { error: new Error(getAuthErrorMessage(finalizeResult.error, 'Sign in finalization failed', 'signIn')) };
+        return {
+          error: new Error(getAuthErrorMessage(finalizeResult.error, 'Sign in finalization failed', 'signIn')),
+          requiresVerification: false,
+        };
+      }
+
+      await fetchProfile().catch(() => undefined);
+      return { error: null, requiresVerification: false };
+    } catch (error: unknown) {
+      return {
+        error: new Error(getAuthErrorMessage(error, 'Sign in failed', 'signIn')),
+        requiresVerification: false,
+      };
+    }
+  };
+
+  const completeSignInVerification = async (code: string) => {
+    try {
+      if (!clerkSignIn) {
+        return { error: new Error('Authentication is not ready yet.') };
+      }
+
+      const normalizedCode = code.trim();
+      if (!normalizedCode) {
+        return { error: new Error('Verification code is required.') };
+      }
+
+      const verificationResult = await clerkSignIn.mfa.verifyEmailCode({ code: normalizedCode });
+      if (verificationResult.error) {
+        return {
+          error: new Error(
+            getAuthErrorMessage(verificationResult.error, 'Invalid or expired verification code.', 'signIn')
+          ),
+        };
+      }
+
+      if (clerkSignIn.status !== 'complete') {
+        return {
+          error: new Error('Verification is not complete yet. Check your code and try again.'),
+        };
+      }
+
+      const finalizeResult = await clerkSignIn.finalize();
+      if (finalizeResult.error) {
+        return {
+          error: new Error(getAuthErrorMessage(finalizeResult.error, 'Could not finalize sign in.', 'signIn')),
+        };
       }
 
       await fetchProfile().catch(() => undefined);
       return { error: null };
     } catch (error: unknown) {
-      return { error: new Error(getAuthErrorMessage(error, 'Sign in failed', 'signIn')) };
+      return {
+        error: new Error(getAuthErrorMessage(error, 'Could not verify your sign in code.', 'signIn')),
+      };
+    }
+  };
+
+  const resendSignInVerification = async () => {
+    try {
+      if (!clerkSignIn) {
+        return { error: new Error('Authentication is not ready yet.') };
+      }
+
+      const resendResult = await clerkSignIn.mfa.sendEmailCode();
+      if (resendResult.error) {
+        return {
+          error: new Error(getAuthErrorMessage(resendResult.error, 'Could not resend verification code.', 'signIn')),
+        };
+      }
+
+      return { error: null };
+    } catch (error: unknown) {
+      return {
+        error: new Error(getAuthErrorMessage(error, 'Could not resend verification code.', 'signIn')),
+      };
     }
   };
 
@@ -525,6 +620,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         completeSignUpVerification,
         resendSignUpVerification,
         signIn,
+        completeSignInVerification,
+        resendSignInVerification,
         signOut,
         refreshProfile,
       }}

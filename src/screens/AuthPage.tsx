@@ -133,9 +133,26 @@ const AuthPage = () => {
         router.push('/chat');
       }
     } else {
-      const { error } = await signIn(normalizedEmail, password);
+      const { error, requiresVerification } = await signIn(normalizedEmail, password);
       if (error) {
         toast({ title: 'Sign in failed', description: error.message, variant: 'destructive' });
+      } else if (requiresVerification) {
+        try {
+          window.sessionStorage.setItem(
+            'pendingSignIn',
+            JSON.stringify({
+              email: normalizedEmail,
+            })
+          );
+        } catch {
+          // Session storage can fail in some browser privacy modes. Continue with route transition.
+        }
+
+        toast({
+          title: 'Verification required',
+          description: 'We sent a verification code to your email address.',
+        });
+        router.push('/auth/sign-in/verify');
       } else {
         router.push('/chat');
       }
